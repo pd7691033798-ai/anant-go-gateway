@@ -663,8 +663,11 @@ func processUserImageState(sender, mediaID string) {
 🔍 *समीक्षा:* हल के शुरुआती चरण सही हैं।
 💡 *संकेत (Hint):* गणना और चिह्नों की पुनः जाँच करें।
 🎯 *सलाह:* बहुत अच्छा प्रयास! अगला चरण हल करके भेजें।`, activeChild.ChildName, activeChild.BatchCode, daysPassed+1)
-			
-					sendWhatsApp(sender, resultJSON, "")
+			sendWhatsApp(sender, replyMsg, "")
+			return
+		}
+
+		sendWhatsApp(sender, resultJSON, "")
 	}()
 }
 
@@ -684,4 +687,4 @@ func main() {
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
-}	 
+}
