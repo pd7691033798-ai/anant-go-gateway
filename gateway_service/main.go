@@ -36,16 +36,16 @@ const (
 )
 
 type ChildProfile struct {
-	ChildName       string
-	ClassLevel      string
-	Subjects        string
-	Board           string
-	BatchCode       string
-	PlanType        string // "DEMO", "BASIC", "PRO"
-	DemoStartDate   time.Time
-	PaidStartDate   time.Time
-	ScansToday      int
-	LastScanDate    string
+	ChildName     string
+	ClassLevel    string
+	Subjects      string
+	Board         string
+	BatchCode     string
+	PlanType      string // "DEMO", "BASIC", "PRO"
+	DemoStartDate time.Time
+	PaidStartDate time.Time
+	ScansToday    int
+	LastScanDate  string
 }
 
 type UserAccount struct {
@@ -92,7 +92,7 @@ var (
 	brainURL           = os.Getenv("BRAIN_SERVICE_URL")
 	whatsappToken      = os.Getenv("WHATSAPP_TOKEN")
 	whatsappPhoneID    = os.Getenv("WHATSAPP_PHONE_ID")
-	verifyToken        = os.Getenv("WHATSAPP_VERIFY_TOKEN")
+	verifyToken        = os.Getenv("VERIFY_TOKEN")
 	adminPhone         = os.Getenv("ADMIN_PHONE")
 	merchantUPIID      = os.Getenv("MERCHANT_UPI_ID")
 	merchantName       = os.Getenv("MERCHANT_BIZ_NAME")
@@ -120,7 +120,7 @@ func init() {
 		adminPhone = "919664006651"
 	}
 	if verifyToken == "" {
-		verifyToken = "ANANT_ABHYAS_SECRET"
+		verifyToken = "anant_secret_2026"
 	}
 	if officialChannelURL == "" {
 		officialChannelURL = "https://whatsapp.com/channel/anantabhyas"
@@ -662,4 +662,26 @@ func processUserImageState(sender, mediaID string) {
 
 🔍 *समीक्षा:* हल के शुरुआती चरण सही हैं।
 💡 *संकेत (Hint):* गणना और चिह्नों की पुनः जाँच करें।
-🎯 *सलाह:* बहुत अच्छा प्रयास! अगला चरण हल करके भेजें।`, activeChild.ChildName, activeChild.BatchCode, daysPas
+🎯 *सलाह:* बहुत अच्छा प्रयास! अगला चरण हल करके भेजें।`, activeChild.ChildName, activeChild.BatchCode, daysPassed+1)
+			
+					sendWhatsApp(sender, resultJSON, "")
+	}()
+}
+
+func main() {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	http.HandleFunc("/webhook", handleWhatsAppWebhook)
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
+	log.Printf("🚀 Server listening on port %s...", port)
+	if err := http.ListenAndServe(":"+port, nil); err != nil {
+		log.Fatalf("Server failed: %v", err)
+	}
+}	 
