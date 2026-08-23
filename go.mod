@@ -1,4 +1,5 @@
-module anant-project
+
+module anant-abhyas
 
 go 1.22
 
