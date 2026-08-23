@@ -2,89 +2,135 @@ package main
 
 import (
 	"fmt"
-	"log"
-	"net/http"
-	"os"
-	"strings"
+
+	"anant-project/audio"
+	"anant-project/database"
+	"anant-project/feedback"
+	"anant-project/holiday"
+	"anant-project/language"
+	"anant-project/monitor"
+	"anant-project/pricing"
+	"anant-project/security"
+	"anant-project/stealth"
+	"anant-project/temporal"
+	"anant-project/vacation"
 )
 
-func handleRootAndAdmin(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, `<!DOCTYPE html>
-<html lang="hi">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>अनंत अभ्यास एडमिन पोर्टल</title>
-    <style>
-        body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #f8fafc; padding: 16px; margin: 0; }
-        .card { background: #1e293b; padding: 16px; border-radius: 12px; margin-bottom: 16px; }
-        .btn-wa { display: block; background: #25d366; color: white; text-align: center; padding: 14px; border-radius: 8px; font-weight: bold; text-decoration: none; margin-bottom: 16px; font-size: 16px; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        .metric { background: #0f172a; padding: 12px; border-radius: 8px; text-align: center; }
-        .val { font-size: 22px; font-weight: bold; color: #38bdf8; margin-top: 4px; }
-    </style>
-</head>
-<body>
-    <h2>🎓 अनंत अभ्यास एडमिन पोर्टल</h2>
-    <p style="color: #4ade80; margin-top: -8px;">गेटवे: +91 9664006651 (Live)</p>
-
-    <!-- WhatsApp शेयर बटन -->
-    <a class="btn-wa" href="https://wa.me/919664006651?text=राम%20राम%20सा%2C%20मुझे%20अनंत%20अभ्यास%20का%20फ्री%20डेमो%20चाहिए" target="_blank">
-        📲 पेरेंट्स को WhatsApp लिंक शेयर करें
-    </a>
-
-    <div class="card">
-        <h3>📊 लाइव मेट्रिक्स</h3>
-        <div class="grid">
-            <div class="metric"><small>कुल सक्रिय छात्र</small><div class="val">1</div></div>
-            <div class="metric"><small>नए जुड़े बच्चे</small><div class="val" style="color:#4ade80;">+1</div></div>
-            <div class="metric"><small>रेफरल पूरे हुए</small><div class="val" style="color:#a855f7;">0</div></div>
-            <div class="metric"><small>पेंडिंग रेफरल</small><div class="val" style="color:#facc15;">0</div></div>
-        </div>
-    </div>
-
-    <div class="card">
-        <h3>🔍 360° छात्र कुंडली सर्च</h3>
-        <input type="text" id="q" placeholder="UID या फोन नंबर दर्ज करें..." style="width: calc(100% - 24px); padding: 12px; background: #0f172a; border: 1px solid #475569; color: #fff; border-radius: 6px;">
-        <button onclick="alert('छात्र: आरव (कक्षा 6) | स्थिति: सक्रिय 7-दिन डेमो')" style="margin-top: 10px; width: 100%; padding: 12px; background: #2563eb; color: #fff; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">सर्च करें</button>
-    </div>
-</body>
-</html>`)
-}
-
-func handleSave(w http.ResponseWriter, r *http.Request) {
-	vcard := strings.Join([]string{
-		"BEGIN:VCARD",
-		"VERSION:3.0",
-		"N:मास्टरजी;अनंत अभ्यास;;;",
-		"FN:अनंत अभ्यास - डिजिटल मास्टरजी",
-		"ORG:Anant Abhyas Education;",
-		"TEL;TYPE=CELL,VOICE,PREF:+919664006651",
-		"NOTE:रोजाना 15 मिनट बोलकर अभ्यास और 7-दिन फ्री डेमो।",
-		"URL:https://wa.me/919664006651?text=राम%20राम%20सा%20मुझे%20फ्री%20डेमो%20चाहिए",
-		"END:VCARD",
-	}, "\r\n")
-
-	w.Header().Set("Content-Type", "text/vcard; charset=utf-8")
-	w.Header().Set("Content-Disposition", "attachment; filename=\"Anant_Abhyas.vcf\"")
-	w.Write([]byte(vcard))
-}
-
 func main() {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", handleRootAndAdmin)
-	mux.HandleFunc("/admin", handleRootAndAdmin)
-	mux.HandleFunc("/save", handleSave)
+	fmt.Println("ðŸš€ 'à¤…à¤¨à¤‚à¤¤ à¤…à¤­à¥à¤¯à¤¾à¤¸' 360Â° à¤®à¤¾à¤¸à¥à¤Ÿà¤° à¤ªà¥à¤°à¥‹à¤¡à¤•à¥à¤¶à¤¨ à¤¬à¥ˆà¤•à¤à¤‚à¤¡ à¤ªà¥à¤°à¤¾à¤°à¤‚à¤­ à¤¹à¥‹ à¤°à¤¹à¤¾ à¤¹à¥ˆ...")
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "10000"
+	// 1. à¤¡à¥‡à¤Ÿà¤¾à¤¬à¥‡à¤¸ à¤‡à¤¨à¤¿à¤¶à¤¿à¤¯à¤²à¤¾à¤‡à¤œà¤¼à¥‡à¤¶à¤¨
+	connStr := "postgres://postgres:password@localhost:5432/anant_abhyas?sslmode=disable"
+	db := database.InitDB(connStr)
+	defer db.Close()
+
+	// 2. à¤•à¥‡à¤‚à¤¦à¥à¤°à¥€à¤¯ à¤¸à¤®à¤¯ à¤µ à¤•à¥ˆà¤²à¥‡à¤‚à¤¡à¤° à¤‡à¤‚à¤Ÿà¥‡à¤²à¤¿à¤œà¥‡à¤‚à¤¸ à¤‡à¤‚à¤œà¤¨
+	clockEngine := temporal.NewClockEngine()
+	timeSnap := clockEngine.GetCurrentSnapshot()
+
+	// 3. à¤¸à¤­à¥€ 20 à¤¸à¥à¤µà¤¤à¤‚à¤¤à¥à¤° à¤®à¥‰à¤¡à¥à¤¯à¥‚à¤² à¤¸à¥‡à¤µà¤¾à¤“à¤‚ à¤•à¤¾ à¤²à¤¿à¤‚à¤•à¥‡à¤œ
+	demoService := pricing.NewDemoService(db)
+	planService := pricing.NewPlanService(db)
+	loyaltyService := pricing.NewLoyaltyService(db)
+	aprilSession := vacation.NewAprilSessionService(db)
+	homeworkDecomposer := vacation.NewHomeworkService(db)
+	winterBootcamp := vacation.NewWinterBootcampService(db)
+	foundationBridge := vacation.NewFoundationBridgeService()
+	examScheduler := holiday.NewExamSchedulerService(db)
+	customInterest := vacation.NewCustomInterestService(db)
+	pacingService := vacation.NewPacingService()
+	panIndiaDialect := language.NewPanIndiaDialectService()
+	fusionEngine := language.NewFusionDialectService(db)
+	voiceTuner := audio.NewVoiceTunerService()
+	supportEngine := feedback.NewSupportEngineService(db)
+	stateEngine := holiday.NewStateHolidayService(db)
+	biometricDNA := security.NewBiometricDNAService(db)
+	secSuite := security.NewSecuritySuite("ANANT_MASTER_SECRET_2026", db)
+	antiSharing := security.NewAntiSharingGuard(db)
+	geoGuard := security.NewGeoTravelService(db)
+	mindReader := monitor.NewMindReader()
+	inactivityNudge := monitor.NewInactivityNudgeService()
+	stealthComposer := stealth.NewStealthComposer()
+
+	// 4. à¤Ÿà¥‡à¤¸à¥à¤Ÿ à¤¸à¤¬à¤®à¤¿à¤¶à¤¨ à¤¸à¤¿à¤®à¥à¤²à¥‡à¤¶à¤¨ (7-à¤¡à¥‡ à¤¡à¥‡à¤®à¥‹ + à¤²à¤¾à¤‡à¤µ à¤Ÿà¤¾à¤‡à¤® + à¤¬à¤¾à¤²-à¤¸à¥à¤µà¤°à¥à¤šà¤¿ + à¤Ÿà¥‡à¤¸à¥à¤Ÿ à¤®à¥‹à¤¡)
+	studentPhone := "9024414973"
+	studentName := "à¤†à¤°à¤µ"
+	registeredGrade := 6
+	scannedPageGrade := 6
+	studentState := "Rajasthan"
+	studentDistrict := "Sri Ganganagar"
+	currentTier := pricing.TierDemo // 7-à¤¦à¤¿à¤¨ à¤¨à¤¿à¤ƒà¤¶à¥à¤²à¥à¤• à¤¡à¥‡à¤®à¥‹
+	currentDeviceHash := "DEVICE_SAMSUNG_M31_ORIGINAL"
+	rawInputSpeech := "à¤®à¥ˆà¤‚à¤¨à¥‡ à¤ à¤¾ à¤•à¥‹à¤¨à¥€ à¤¦à¤¸ à¤®à¥ˆà¤‚ à¤•à¥€ à¤•à¤¹à¤¨à¤¾ à¤šà¤¾à¤¹à¤¨à¤¾"
+	childChosenTopicVoice := "à¤®à¥à¤à¥‡ à¤•à¤¾à¤°à¥‹à¤‚ à¤•à¥‡ à¤‡à¤‚à¤œà¤¨ à¤”à¤° à¤°à¥‹à¤¬à¥‹à¤Ÿà¤¿à¤•à¥à¤¸ à¤•à¥‡ à¤¬à¤¾à¤°à¥‡ à¤®à¥‡à¤‚ à¤¸à¥€à¤–à¤¨à¤¾ à¤¹à¥ˆ"
+	sampleOCR := "à¤ªà¥à¤°à¤¶à¥à¤¨ 1: à¤­à¤¿à¤¨à¥à¤¨ à¤•à¤¾ à¤œà¥‹à¤¡à¤¼à¥¤ 1/2 + 3/4 = 5/4à¥¤"
+	dummyImageBytes := []byte("image_payload_stream_bytes")
+	handwritingSimilarity := 0.94
+
+	// A. à¤¸à¥à¤°à¤•à¥à¤·à¤¾, à¤°à¥‡à¤Ÿ à¤²à¤¿à¤®à¤¿à¤Ÿ à¤µ à¤à¤‚à¤Ÿà¥€-à¤¶à¥‡à¤¯à¤°à¤¿à¤‚à¤—
+	limits := planService.GetPlanLimits(currentTier)
+	allowed, limitMsg := secSuite.ValidateRateLimit(studentPhone, limits.MaxDailyScans)
+	if !allowed {
+		fmt.Printf("ðŸ›‘ à¤¸à¥à¤°à¤•à¥à¤·à¤¾ à¤¬à¥à¤²à¥‰à¤•: %s\n", limitMsg)
+		return
+	}
+	sharingVerdict := antiSharing.EvaluateSharingRisk(studentPhone, registeredGrade, scannedPageGrade, handwritingSimilarity, 1, limits.MaxDailyScans)
+	if sharingVerdict.IsBlocked {
+		fmt.Printf("ðŸ›‘ à¤¶à¥‡à¤¯à¤°à¤¿à¤‚à¤— à¤¬à¥à¤²à¥‰à¤•: %s\n", sharingVerdict.UserMessage)
+		return
+	}
+	_, _ = biometricDNA.VerifyHandwritingDNA(studentPhone, handwritingSimilarity)
+
+	// B. à¤¹à¥ˆà¤¶ à¤µ à¤¡à¥à¤ªà¥à¤²à¤¿à¤•à¥‡à¤Ÿ à¤¸à¤¤à¥à¤¯à¤¾à¤ªà¤¨
+	imgHash := secSuite.GenerateHash(dummyImageBytes)
+	isValid, _, userMsg := secSuite.VerifySubmission(studentPhone, sampleOCR, imgHash)
+	if !isValid {
+		fmt.Println("âš ï¸ à¤¸à¤¬à¤®à¤¿à¤¶à¤¨ à¤…à¤¸à¥à¤µà¥€à¤•à¥ƒà¤¤")
+		return
 	}
 
-	serverAddr := ":" + port
-	log.Printf("🚀 सर्वर सफलतापूर्वक पोर्ट %s पर लिसन कर रहा है...", port)
-	if err := http.ListenAndServe(serverAddr, mux); err != nil {
-		log.Fatalf("सर्वर एरर: %v", err)
-	}
+	// C. à¤¬à¤¾à¤²-à¤¸à¥à¤µà¤°à¥à¤šà¤¿ à¤Ÿà¥à¤°à¥ˆà¤• à¤µ à¤°à¤¾à¤œà¥à¤¯-à¤µà¤¾à¤° à¤¸à¤¤à¥à¤°
+	childTrack := customInterest.AutoSetFromChildVoice(studentPhone, childChosenTopicVoice)
+	sessionInfo := aprilSession.ResolveStateAcademicSession(studentState, studentDistrict)
+	winterInfo := winterBootcamp.ResolveWinterBootcamp(studentState, studentDistrict)
+
+	// D. à¤ªà¤°à¥€à¤•à¥à¤·à¤¾, à¤¬à¥‹à¤²à¥€ à¤µ à¤…à¤µà¤•à¤¾à¤¶ à¤µà¤¿à¤¶à¥à¤²à¥‡à¤·à¤£
+	examStatus := examScheduler.GetActiveExamMode(studentPhone, rawInputSpeech)
+	dialectProf := fusionEngine.DetectAndResolve(rawInputSpeech, studentState, studentDistrict)
+	isHoliday, holidayType, daysLeft := stateEngine.CheckHoliday(studentState, studentDistrict)
+	renewalFee, loyaltyMsg := loyaltyService.CalculateLoyaltyFee(studentPhone, 149.0, currentTier)
+
+	// E. à¤¸à¥à¤Ÿà¥€à¤²à¥à¤¥ AI à¤ªà¥à¤°à¥‰à¤®à¥à¤ªà¥à¤Ÿ à¤µ à¤µà¥‰à¤‡à¤¸ SSML
+	kidSSML := voiceTuner.GenerateKidFriendlySSML(studentName, "à¤†à¤œ à¤†à¤ªà¤¨à¥‡ à¤­à¤¿à¤¨à¥à¤¨ à¤•à¤¾ à¤œà¥‹à¤¡à¤¼ à¤¸à¤¹à¥€ à¤²à¤¿à¤–à¤¾ à¤¹à¥ˆà¥¤", dialectProf.ToneHint)
+	aiPrompt := stealthComposer.BuildPrompt(studentName, studentState, studentDistrict, sessionInfo.SessionPhase, string(currentTier), isHoliday, dialectProf)
+
+	// 5. à¤¸à¤‚à¤ªà¥‚à¤°à¥à¤£ à¤¸à¤¿à¤¸à¥à¤Ÿà¤® à¤°à¤¿à¤ªà¥‹à¤°à¥à¤Ÿ
+	fmt.Println("\n=======================================================")
+	fmt.Printf("â±ï¸ à¤²à¤¾à¤‡à¤µ à¤¸à¤°à¥à¤µà¤° à¤Ÿà¤¾à¤‡à¤®à¤¸à¥à¤Ÿà¥ˆà¤®à¥à¤ª: %s (%s)\n", timeSnap.FormattedTimestamp, timeSnap.AcademicSessionLabel)
+	fmt.Printf("ðŸ“… à¤•à¤² à¤•à¥€ à¤¤à¤¾à¤°à¥€à¤–: %s | à¤®à¤¾à¤¹ à¤•à¤¾ à¤…à¤‚à¤¤: %t | à¤µà¤°à¥à¤· à¤•à¤¾ à¤…à¤‚à¤¤: %t\n", timeSnap.NextDayDateString, timeSnap.IsMonthLastDay, timeSnap.IsYearLastDay)
+	fmt.Println("-------------------------------------------------------")
+	fmt.Printf("âœ… à¤¸à¤¬à¤®à¤¿à¤¶à¤¨ à¤¸à¥à¤¥à¤¿à¤¤à¤¿: %s (à¤¶à¥‡à¤¯à¤°à¤¿à¤‚à¤— à¤°à¤¿à¤¸à¥à¤•: 0%%)\n", userMsg)
+	fmt.Printf("ðŸ‘¤ à¤ªà¥à¤²à¤¾à¤¨: %s (à¤µà¥ˆà¤§à¤¤à¤¾: %d à¤¦à¤¿à¤¨, à¤•à¥‹à¤Ÿà¤¾: %d à¤¸à¥à¤•à¥ˆà¤¨/à¤¦à¤¿à¤¨)\n", currentTier, limits.TrialDays, limits.MaxDailyScans)
+	fmt.Printf("ðŸ“ à¤°à¤¾à¤œà¥à¤¯-à¤µà¤¾à¤° à¤¸à¤¤à¥à¤°: %s\n", sessionInfo.SessionPhase)
+	fmt.Printf("â„ï¸ à¤°à¤¾à¤œà¥à¤¯-à¤µà¤¾à¤° à¤µà¤¿à¤‚à¤Ÿà¤° à¤¸à¥à¤¥à¤¿à¤¤à¤¿: %t (à¤¶à¥‡à¤· à¤¦à¤¿à¤¨: %d)\n", winterInfo.IsWinterBreak, winterInfo.DaysLeft)
+	fmt.Printf("ðŸŽ¯ à¤ªà¤°à¥€à¤•à¥à¤·à¤¾ à¤®à¥‹à¤¡: %s\n", examStatus.ExamHeadline)
+	fmt.Printf("ðŸŒŸ à¤¬à¤¾à¤²-à¤¸à¥à¤µà¤°à¥à¤šà¤¿ à¤µà¤¿à¤·à¤¯: \"%s\"\n", childTrack.TopicName)
+	fmt.Printf("ðŸ—£ï¸ à¤¸à¤•à¥à¤°à¤¿à¤¯ à¤¬à¥‹à¤²à¥€: %s (%s)\n", dialectProf.DialectCode, dialectProf.RegionHint)
+	fmt.Printf("ðŸ“… à¤…à¤µà¤•à¤¾à¤¶ à¤¸à¥à¤¥à¤¿à¤¤à¤¿: %t (%s, à¤¶à¥‡à¤· à¤¦à¤¿à¤¨: %d)\n", isHoliday, holidayType, daysLeft)
+	fmt.Printf("ðŸ’° à¤¨à¤µà¥€à¤¨à¥€à¤•à¤°à¤£ à¤¸à¥à¤¥à¤¿à¤¤à¤¿: â‚¹%.2f (%s)\n", renewalFee, loyaltyMsg)
+	fmt.Println("-------------------------------------------------------")
+	fmt.Printf("ðŸŽ™ï¸ à¤µà¥‰à¤‡à¤¸ SSML:\n%s\n", kidSSML)
+	fmt.Println("-------------------------------------------------------")
+	fmt.Printf("ðŸ¤– à¤®à¤¾à¤¸à¥à¤Ÿà¤° à¤¸à¥à¤Ÿà¥€à¤²à¥à¤¥ AI à¤ªà¥à¤°à¥‰à¤®à¥à¤ªà¥à¤Ÿ:\n%s\n", aiPrompt)
+	fmt.Println("=======================================================")
+
+	_ = demoService
+	_ = homeworkDecomposer
+	_ = foundationBridge
+	_ = pacingService
+	_ = panIndiaDialect
+	_ = supportEngine
+	_ = geoGuard
+	_ = mindReader
+	_ = inactivityNudge
 }
