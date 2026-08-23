@@ -1,7 +1,9 @@
 package com.anantabhyas.admin
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import android.provider.ContactsContract
 import android.view.View
@@ -18,7 +20,7 @@ import java.io.IOException
 
 class MainActivity : AppCompatActivity() {
 
-    private val BASE_URL = "http://10.0.2.2:8080" // आपके गो सर्वर का IP
+    private val BASE_URL = "https://anant-go-gateway.onrender.com"
     private val client = OkHttpClient()
 
     private lateinit var tvTotalActive: TextView
@@ -30,6 +32,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cardResult: LinearLayout
     private lateinit var tvKundaliData: TextView
     private lateinit var btnSyncContacts: Button
+    private lateinit var btnShareWhatsApp: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,8 +47,14 @@ class MainActivity : AppCompatActivity() {
         cardResult = findViewById(R.id.cardResult)
         tvKundaliData = findViewById(R.id.tvKundaliData)
         btnSyncContacts = findViewById(R.id.btnSyncContacts)
+        btnShareWhatsApp = findViewById(R.id.btnShareWhatsApp)
 
         fetchAdminDashboardStats()
+
+        // 📲 WhatsApp पर पेरेंट्स को इनविटेशन लिंक शेयर करने का लॉजिक
+        btnShareWhatsApp.setOnClickListener {
+            shareInviteLinkToParents()
+        }
 
         btnSearch.setOnClickListener {
             val key = etSearchKey.text.toString().trim()
@@ -59,6 +68,24 @@ class MainActivity : AppCompatActivity() {
         btnSyncContacts.setOnClickListener {
             checkAndSyncContacts()
         }
+    }
+
+    private fun shareInviteLinkToParents() {
+        val shareMessage = """
+            🙏 *राम राम सा!*
+            
+            बच्चों के दैनिक बोलकर अभ्यास और डिजिटल मास्टरजी से जुड़ने के लिए नीचे दिए गए लिंक पर टैप करें और WhatsApp पर 'राम राम सा' लिखकर भेजें:
+            
+            👉 https://wa.me/919664006651?text=राम%20राम%20सा%2C%20मुझे%20अनंत%20अभ्यास%20का%20फ्री%20डेमो%20चाहिए
+            
+            *(कक्षा 1 से 12 तक - 7 दिन का फ्री डेमो)*
+        """.trimIndent()
+
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, shareMessage)
+        }
+        startActivity(Intent.createChooser(intent, "पेरेंट्स को WhatsApp लिंक भेजें"))
     }
 
     private fun fetchAdminDashboardStats() {
