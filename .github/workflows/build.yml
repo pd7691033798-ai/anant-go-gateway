@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Repository
+    - name: Checkout Code
       uses: actions/checkout@v4
 
     - name: Set up JDK 17
@@ -19,23 +19,87 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    - name: Setup Android SDK
+    - name: Install Android SDK & Build Tools
       uses: android-actions/setup-android@v3
 
-    - name: Grant Execute Permission for Gradlew
+    - name: Auto-Generate Gradle Wrapper & Build APK
       run: |
-        if [ -f gradlew ]; then chmod +x gradlew; fi
-        if [ -f android-app/gradlew ]; then chmod +x android-app/gradlew; fi
+        # Gradle इंस्टॉल और प्रोजेक्ट इनिशियलाइज़
+        sudo apt-get update && sudo apt-get install -y gradle
+        cd android-app
+        
+        # अगर build.gradle नहीं है तो ऑटो-क्रिएट करें
+        cat << 'EOF' > settings.gradle
+        rootProject.name = "AnantAbhyasAdmin"
+        include ':app'
+        EOF
 
-    - name: Build Debug APK
-      run: |
-        if [ -f gradlew ]; then ./gradlew assembleDebug; elif [ -f android-app/gradlew ]; then cd android-app && ./gradlew assembleDebug; else echo "Ready"; fi
+        cat << 'EOF' > build.gradle
+        buildscript {
+            repositories {
+                google()
+                mavenCentral()
+            }
+            dependencies {
+                classpath 'com.android.tools.build:gradle:8.2.2'
+                classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22'
+            }
+        }
+        allprojects {
+            repositories {
+                google()
+                mavenCentral()
+            }
+        }
+        EOF
 
-    - name: Upload APK Artifact
+        mkdir -p app
+        cat << 'EOF' > app/build.gradle
+        plugins {
+            id 'com.android.application'
+            id 'org.jetbrains.kotlin.android'
+        }
+
+        android {
+            namespace 'com.anantabhyas.admin'
+            compileSdk 34
+
+            defaultConfig {
+                applicationId "com.anantabhyas.admin"
+                minSdk 24
+                targetSdk 34
+                versionCode 1
+                versionName "1.0"
+            }
+
+            buildTypes {
+                release {
+                    minifyEnabled false
+                }
+            }
+            compileOptions {
+                sourceCompatibility JavaVersion.VERSION_17
+                targetCompatibility JavaVersion.VERSION_17
+            }
+            kotlinOptions {
+                jvmTarget = '17'
+            }
+        }
+
+        dependencies {
+            implementation 'androidx.core:core-ktx:1.12.0'
+            implementation 'androidx.appcompat:appcompat:1.6.1'
+            implementation 'com.google.android.material:material:1.11.0'
+            implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+        }
+        EOF
+
+        # Wrapper जनरेट करें और APK बिल्ड करें
+        gradle wrapper
+        ./gradlew assembleDebug --stacktrace
+
+    - name: Upload Finished APK
       uses: actions/upload-artifact@v4
       with:
         name: Anant-Abhyas-Admin-APK
-        path: |
-          path: android-app/**/build/outputs/apk/debug/*.apk
-    
-          
+        path: android-app/app/build/outputs/apk/debug/*.apk
