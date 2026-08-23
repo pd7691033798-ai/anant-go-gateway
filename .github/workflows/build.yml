@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Repository
+    - name: Checkout Code
       uses: actions/checkout@v4
 
     - name: Set up JDK 17
@@ -22,18 +22,17 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    - name: Install Standalone Gradle & Build APK
+    - name: Scaffold Complete Android Project
       run: |
-        # 1. Gradle 8.5 डाउनलोड और सेटअप
-        wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
-        unzip -q gradle-8.5-bin.zip
-        export PATH=$PWD/gradle-8.5/bin:$PATH
+        # 1. Licenses ऑटो-स्वीकार करें
+        yes | sdkmanager --licenses || true
 
-        # 2. Android डायरेक्टरी और सेटिंग्स तैयार करना
-        cd android-app
-        mkdir -p app/src/main/res/values
+        # 2. आवश्यक डायरेक्टरी बनाएं
+        mkdir -p android-app/app/src/main/res/values
+        mkdir -p android-app/app/src/main/res/drawable
 
-        cat << 'EOF' > settings.gradle
+        # 3. settings.gradle
+        cat << 'EOF' > android-app/settings.gradle
         pluginManagement {
             repositories {
                 google()
@@ -52,18 +51,24 @@ jobs:
         include ':app'
         EOF
 
-        cat << 'EOF' > build.gradle
-        plugins {
-            id 'com.android.application' version '8.2.2' apply false
-            id 'org.jetbrains.kotlin.android' version '1.9.22' apply false
+        # 4. Root build.gradle
+        cat << 'EOF' > android-app/build.gradle
+        buildscript {
+            repositories {
+                google()
+                mavenCentral()
+            }
+            dependencies {
+                classpath 'com.android.tools.build:gradle:8.1.4'
+                classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.22'
+            }
         }
         EOF
 
-        cat << 'EOF' > app/build.gradle
-        plugins {
-            id 'com.android.application'
-            id 'org.jetbrains.kotlin.android'
-        }
+        # 5. App build.gradle
+        cat << 'EOF' > android-app/app/build.gradle
+        apply plugin: 'com.android.application'
+        apply plugin: 'org.jetbrains.kotlin.android'
 
         android {
             namespace 'com.anantabhyas.admin'
@@ -92,27 +97,46 @@ jobs:
         }
 
         dependencies {
-            implementation 'androidx.core:core-ktx:1.12.0'
+            implementation 'androidx.core:core-ktx:1.10.1'
             implementation 'androidx.appcompat:appcompat:1.6.1'
-            implementation 'com.google.android.material:material:1.11.0'
-            implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+            implementation 'com.google.android.material:material:1.9.0'
+            implementation 'com.squareup.okhttp3:okhttp:4.11.0'
         }
         EOF
 
-        cat << 'EOF' > app/src/main/res/values/strings.xml
+        # 6. Default Fallback Vector/Drawable
+        cat << 'EOF' > android-app/app/src/main/res/drawable/anant_logo.xml
+        <vector xmlns:android="http://schemas.android.com/apk/res/android"
+            android:width="108dp"
+            android:height="108dp"
+            android:viewportWidth="108"
+            android:viewportHeight="108">
+            <path
+                android:fillColor="#38BDF8"
+                android:pathData="M54,10 L94,90 L14,90 Z" />
+        </vector>
+        EOF
+
+        # 7. Resources Values
+        cat << 'EOF' > android-app/app/src/main/res/values/strings.xml
         <resources>
             <string name="app_name">अनंत अभ्यास एडमिन</string>
         </resources>
         EOF
 
-        cat << 'EOF' > app/src/main/res/values/themes.xml
+        cat << 'EOF' > android-app/app/src/main/res/values/themes.xml
         <resources>
             <style name="Theme.AppCompat.NoActionBar" parent="Theme.AppCompat.Light.NoActionBar"/>
         </resources>
         EOF
 
-        # 3. APK कंपाइल करें
-        gradle assembleDebug --no-daemon --stacktrace
+    - name: Download & Run Gradle
+      run: |
+        wget -q https://services.gradle.org/distributions/gradle-8.1.1-bin.zip
+        unzip -q gradle-8.1.1-bin.zip
+        export PATH=$PWD/gradle-8.1.1/bin:$PATH
+        cd android-app
+        gradle assembleDebug --no-daemon
 
     - name: Upload Finished APK
       uses: actions/upload-artifact@v4
