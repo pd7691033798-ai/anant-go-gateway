@@ -36,6 +36,6 @@ jobs:
       with:
         name: Anant-Abhyas-Admin-APK
         path: |
-          **/build/outputs/apk/debug/*.apk
-          **/*.apk
+          path: android-app/**/build/outputs/apk/debug/*.apk
+    
           
