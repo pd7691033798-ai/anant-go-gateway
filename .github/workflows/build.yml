@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Code
+    - name: Checkout Repository
       uses: actions/checkout@v4
 
     - name: Set up JDK 17
@@ -19,16 +19,21 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    - name: Set up Android SDK
+    - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    - name: Scaffold & Build Project
+    - name: Install Standalone Gradle & Build APK
       run: |
-        # 1. Project directory setup
-        mkdir -p android-app/app/src/main/res/values
+        # 1. Gradle 8.5 डाउनलोड और सेटअप
+        wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
+        unzip -q gradle-8.5-bin.zip
+        export PATH=$PWD/gradle-8.5/bin:$PATH
 
-        # 2. settings.gradle
-        cat << 'EOF' > android-app/settings.gradle
+        # 2. Android डायरेक्टरी और सेटिंग्स तैयार करना
+        cd android-app
+        mkdir -p app/src/main/res/values
+
+        cat << 'EOF' > settings.gradle
         pluginManagement {
             repositories {
                 google()
@@ -47,16 +52,14 @@ jobs:
         include ':app'
         EOF
 
-        # 3. Root build.gradle
-        cat << 'EOF' > android-app/build.gradle
+        cat << 'EOF' > build.gradle
         plugins {
             id 'com.android.application' version '8.2.2' apply false
             id 'org.jetbrains.kotlin.android' version '1.9.22' apply false
         }
         EOF
 
-        # 4. App build.gradle
-        cat << 'EOF' > android-app/app/build.gradle
+        cat << 'EOF' > app/build.gradle
         plugins {
             id 'com.android.application'
             id 'org.jetbrains.kotlin.android'
@@ -96,28 +99,23 @@ jobs:
         }
         EOF
 
-        # 5. Resources XML
-        cat << 'EOF' > android-app/app/src/main/res/values/strings.xml
+        cat << 'EOF' > app/src/main/res/values/strings.xml
         <resources>
             <string name="app_name">अनंत अभ्यास एडमिन</string>
         </resources>
         EOF
 
-        cat << 'EOF' > android-app/app/src/main/res/values/themes.xml
+        cat << 'EOF' > app/src/main/res/values/themes.xml
         <resources>
             <style name="Theme.AppCompat.NoActionBar" parent="Theme.AppCompat.Light.NoActionBar"/>
         </resources>
         EOF
 
-    - name: Run Gradle Build
-      uses: gradle/gradle-build-action@v3
-      with:
-        build-root-directory: android-app
-        arguments: assembleDebug --no-daemon
+        # 3. APK कंपाइल करें
+        gradle assembleDebug --no-daemon --stacktrace
 
     - name: Upload Finished APK
       uses: actions/upload-artifact@v4
       with:
         name: Anant-Abhyas-Admin-APK
         path: android-app/app/build/outputs/apk/debug/*.apk
-        
