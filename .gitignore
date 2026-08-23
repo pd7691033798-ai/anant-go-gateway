@@ -1,0 +1,14 @@
+*.exe
+*.dll
+*.so
+*.dylib
+anant_core
+anant_abhyas_core
+.gradle/
+build/
+app/build/
+*.iml
+.idea/
+local.properties
+.DS_Store
+*.log
