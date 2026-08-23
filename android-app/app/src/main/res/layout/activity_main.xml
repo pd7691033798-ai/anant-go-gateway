@@ -10,7 +10,7 @@
         android:layout_height="wrap_content"
         android:orientation="vertical">
 
-        <!-- मुख्य ब्रांड नाम -->
+        <!-- मुख्य शीर्षक -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -27,6 +27,19 @@
             android:textColor="#4ADE80"
             android:textSize="14sp" />
 
+        <!-- 📲 पेरेंट्स को WhatsApp लिंक भेजने का मुख्य बटन -->
+        <Button
+            android:id="@+id/btnShareWhatsApp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:backgroundTint="#25D366"
+            android:padding="12dp"
+            android:text="📲 पेरेंट्स को WhatsApp लिंक शेयर करें"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
         <!-- लाइव मेट्रिक्स ग्रिड -->
         <GridLayout
             android:layout_width="match_parent"
@@ -35,7 +48,6 @@
             android:columnCount="2"
             android:rowCount="2">
 
-            <!-- कुल सक्रिय छात्र -->
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -48,7 +60,6 @@
                 <TextView android:id="@+id/tvTotalActive" android:text="0" android:textColor="#38BDF8" android:textSize="22sp" android:textStyle="bold"/>
             </LinearLayout>
 
-            <!-- नए जुड़े बच्चे -->
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -61,7 +72,6 @@
                 <TextView android:id="@+id/tvNewJoined" android:text="0" android:textColor="#4ADE80" android:textSize="22sp" android:textStyle="bold"/>
             </LinearLayout>
 
-            <!-- पूरे हुए रेफरल -->
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -74,7 +84,6 @@
                 <TextView android:id="@+id/tvReferralCompleted" android:text="0" android:textColor="#A855F7" android:textSize="22sp" android:textStyle="bold"/>
             </LinearLayout>
 
-            <!-- नए रेफरल -->
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -88,7 +97,7 @@
             </LinearLayout>
         </GridLayout>
 
-        <!-- 360° छात्र कुंडली सर्च बार -->
+        <!-- 360° छात्र कुंडली सर्च -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -104,7 +113,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:background="#1E293B"
-            android:hint="UID (ABHYAS-INDIA-2026-XXXX) या फोन"
+            android:hint="UID या फोन नंबर दर्ज करें"
             android:padding="12dp"
             android:textColor="#FFFFFF"
             android:textColorHint="#64748B" />
@@ -119,7 +128,7 @@
             android:textColor="#FFFFFF"
             android:textStyle="bold" />
 
-        <!-- रिजल्ट डिस्प्ले कार्ड -->
+        <!-- कुंडली रिजल्ट कार्ड -->
         <LinearLayout
             android:id="@+id/cardResult"
             android:layout_width="match_parent"
@@ -148,12 +157,12 @@
                 android:textSize="14sp" />
         </LinearLayout>
 
-        <!-- 1-टैप कॉन्टैक्ट सिंक बटन -->
+        <!-- 1-टैप कॉन्टैक्ट सिंक -->
         <Button
             android:id="@+id/btnSyncContacts"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
+            android:layout_marginTop="20dp"
             android:backgroundTint="#10B981"
             android:text="🔄 फोन के कॉन्टैक्ट्स सर्वर पर सुरक्षित सिंक करें"
             android:textColor="#FFFFFF" />
