@@ -347,3 +347,9 @@ func main() {
 	log.Printf("🚀 सर्वर पोर्ट :%s पर सक्रिय है...", port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
+func main() {
+    // अलग फाइल वाला Keep-Alive यहाँ से चल जाएगा
+    go StartKeepAlive()
+
+    // बाकी आपका सर्वर और डेटाबेस कोड...
+}
