@@ -85,6 +85,28 @@ var (
 	clockEngine  = temporal.NewClockEngine()
 )
 
+// StartKeepAlive सर्वर को Render पर सोने से बचाने के लिए हर 10 मिनट में खुद को पिंग करेगा
+func StartKeepAlive() {
+	appURL := os.Getenv("APP_URL")
+	if appURL == "" {
+		log.Println("Keep-Alive: APP_URL सेट नहीं है, सेल्फ-पिंग बंद है।")
+		return
+	}
+
+	ticker := time.NewTicker(10 * time.Minute)
+	go func() {
+		for range ticker.C {
+			resp, err := http.Get(appURL)
+			if err != nil {
+				log.Printf("Keep-Alive Ping विफल: %v\n", err)
+				continue
+			}
+			resp.Body.Close()
+			log.Printf("Keep-Alive Ping सफल: सर्वर जाग रहा है (Status: %s)\n", resp.Status)
+		}
+	}()
+}
+
 func getOrCreateSession(phone string) *StudentSession {
 	dbMutex.Lock()
 	defer dbMutex.Unlock()
@@ -246,7 +268,7 @@ func MasterWhatsAppGateway(fromPhone, messageBody string) string {
 		if lower == "start" {
 			return fmt.Sprintf("📚 Day अभ्यास एक्टिव है (%s)। सवाल पूछें या फोटो भेजें।", session.ChildName)
 		}
-		return "अभ्यास के लिए *START* लिखें।"
+		return "अभ्यास के लिए *START* लिखें。"
 
 	case StateAwaitingPlan:
 		if lower == "1" || strings.Contains(lower, "basic") {
@@ -270,7 +292,10 @@ func MasterWhatsAppGateway(fromPhone, messageBody string) string {
 func main() {
 	fmt.Println("🚀 'अनंत अभ्यास' 360° मास्टर प्रोडक्शन बैकएंड प्रारंभ हो रहा है...")
 
-	// 20 इंजनों की बैकग्राउंड बाइंडिंग
+	// 1. सर्वर को 24x7 जागता रखने के लिए Keep-Alive पिंग चालू करें
+	go StartKeepAlive()
+
+	// 2. 20 इंजनों की बैकग्राउंड बाइंडिंग और डेटाबेस सेटअप
 	go func() {
 		connStr := os.Getenv("DATABASE_URL")
 		if connStr == "" {
@@ -319,10 +344,10 @@ func main() {
 		fmt.Println("✅ सभी 20 कोर इंजन सफलतापूर्वक बाइंड और सक्रिय हैं।")
 	}()
 
-	// लाइव HTTP & Webhook
+	// 3. लाइव HTTP & Webhook राउट्स
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, `<h2>🎓 अनंत अभ्यास (रॉयल एफएमसी कॉरपोरेशन) लाइव है।</h2><p><a href="/admin">एडमिन पोर्टल</a></p>`)
+		fmt.Fprint(w, `<h2>🎓 अनंत अभ्यास (रॉयल एफएमसी कॉरपोरेशन) लाइव है 24x7!</h2><p><a href="/admin">एडमिन पोर्टल</a></p>`)
 	})
 
 	http.HandleFunc("/webhook", func(w http.ResponseWriter, r *http.Request) {
@@ -342,14 +367,11 @@ func main() {
 		fmt.Fprintf(w, "<h2>अनंत अभ्यास एडमिन पोर्टल</h2><p>गेटवे: 9664006651 | एडमिन: 9024414973</p><p>समय (IST): %s</p>", snap.FormattedTimestamp)
 	})
 
+	// 4. पोर्ट बाइंडिंग और सर्वर स्टार्टअप
 	port := os.Getenv("PORT")
-	if port == "" { port = "8080" }
-	log.Printf("🚀 सर्वर पोर्ट :%s पर सक्रिय है...", port)
+	if port == "" { 
+		port = "8080" 
+	}
+	log.Printf("🚀 अनंत अभ्यास सर्वर पोर्ट :%s पर सक्रिय है...", port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
-}
-func main() {
-    // अलग फाइल वाला Keep-Alive यहाँ से चल जाएगा
-    go StartKeepAlive()
-
-    // बाकी आपका सर्वर और डेटाबेस कोड...
 }
