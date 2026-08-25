@@ -5,141 +5,556 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
 
-    - name: Setup Android SDK
-      uses: android-actions/setup-android@v3
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
-    - name: Scaffold Complete Android Project
-      run: |
-        # 1. Licenses ऑटो-स्वीकार करें
-        yes | sdkmanager --licenses || true
+      - name: Install Android SDK
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
-        # 2. आवश्यक डायरेक्टरी बनाएं
-        mkdir -p android-app/app/src/main/res/values
-        mkdir -p android-app/app/src/main/res/drawable
+      - name: Create Android Project
+        run: |
+          mkdir -p android-app/app/src/main/java/com/anantabhyas/admin
+          mkdir -p android-app/app/src/main/res/layout
+          mkdir -p android-app/app/src/main/res/values
+          mkdir -p android-app/app/src/main/res/drawable
 
-        # 3. settings.gradle
-        cat << 'EOF' > android-app/settings.gradle
-        pluginManagement {
-            repositories {
-                google()
-                mavenCentral()
-                gradlePluginPortal()
-            }
-        }
-        dependencyResolutionManagement {
-            repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-            repositories {
-                google()
-                mavenCentral()
-            }
-        }
-        rootProject.name = "AnantAbhyasAdmin"
-        include ':app'
-        EOF
+          cat > android-app/settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
 
-        # 4. Root build.gradle
-        cat << 'EOF' > android-app/build.gradle
-        buildscript {
-            repositories {
-                google()
-                mavenCentral()
-            }
-            dependencies {
-                classpath 'com.android.tools.build:gradle:8.1.4'
-                classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.22'
-            }
-        }
-        EOF
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
 
-        # 5. App build.gradle
-        cat << 'EOF' > android-app/app/build.gradle
-        apply plugin: 'com.android.application'
-        apply plugin: 'org.jetbrains.kotlin.android'
+          rootProject.name = "AnantAbhyasAdmin"
+          include(":app")
+          EOF
 
-        android {
-            namespace 'com.anantabhyas.admin'
-            compileSdk 34
+          cat > android-app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.1.4' apply false
+              id 'org.jetbrains.kotlin.android' version '1.8.22' apply false
+          }
+          EOF
 
-            defaultConfig {
-                applicationId "com.anantabhyas.admin"
-                minSdk 24
-                targetSdk 34
-                versionCode 1
-                versionName "1.0"
-            }
+          cat > android-app/app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+              id 'org.jetbrains.kotlin.android'
+          }
 
-            buildTypes {
-                release {
-                    minifyEnabled false
-                }
-            }
-            compileOptions {
-                sourceCompatibility JavaVersion.VERSION_17
-                targetCompatibility JavaVersion.VERSION_17
-            }
-            kotlinOptions {
-                jvmTarget = '17'
-            }
-        }
+          android {
+              namespace 'com.anantabhyas.admin'
+              compileSdk 34
 
-        dependencies {
-            implementation 'androidx.core:core-ktx:1.10.1'
-            implementation 'androidx.appcompat:appcompat:1.6.1'
-            implementation 'com.google.android.material:material:1.9.0'
-            implementation 'com.squareup.okhttp3:okhttp:4.11.0'
-        }
-        EOF
+              defaultConfig {
+                  applicationId "com.anantabhyas.admin"
+                  minSdk 24
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
 
-        # 6. Default Fallback Vector/Drawable
-        cat << 'EOF' > android-app/app/src/main/res/drawable/anant_logo.xml
-        <vector xmlns:android="http://schemas.android.com/apk/res/android"
-            android:width="108dp"
-            android:height="108dp"
-            android:viewportWidth="108"
-            android:viewportHeight="108">
-            <path
-                android:fillColor="#38BDF8"
-                android:pathData="M54,10 L94,90 L14,90 Z" />
-        </vector>
-        EOF
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                  }
+              }
 
-        # 7. Resources Values
-        cat << 'EOF' > android-app/app/src/main/res/values/strings.xml
-        <resources>
-            <string name="app_name">अनंत अभ्यास एडमिन</string>
-        </resources>
-        EOF
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
 
-        cat << 'EOF' > android-app/app/src/main/res/values/themes.xml
-        <resources>
-            <style name="Theme.AppCompat.NoActionBar" parent="Theme.AppCompat.Light.NoActionBar"/>
-        </resources>
-        EOF
+              kotlinOptions {
+                  jvmTarget = '17'
+              }
+          }
 
-    - name: Download & Run Gradle
-      run: |
-        wget -q https://services.gradle.org/distributions/gradle-8.1.1-bin.zip
-        unzip -q gradle-8.1.1-bin.zip
-        export PATH=$PWD/gradle-8.1.1/bin:$PATH
-        cd android-app
-        gradle assembleDebug --no-daemon
+          dependencies {
+              implementation 'androidx.core:core-ktx:1.10.1'
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+              implementation 'com.google.android.material:material:1.9.0'
+              implementation 'com.squareup.okhttp3:okhttp:4.11.0'
+          }
+          EOF
 
-    - name: Upload Finished APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: Anant-Abhyas-Admin-APK
-        path: android-app/app/build/outputs/apk/debug/*.apk
+          cat > android-app/app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.READ_CONTACTS" />
+
+              <application
+                  android:allowBackup="false"
+                  android:icon="@drawable/anant_logo"
+                  android:label="@string/app_name"
+                  android:theme="@style/Theme.AnantAbhyas">
+
+                  <activity
+                      android:name=".SplashActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="false" />
+
+              </application>
+          </manifest>
+          EOF
+
+          cat > android-app/app/src/main/res/values/strings.xml <<'EOF'
+          <resources>
+              <string name="app_name">अनंत अभ्यास एडमिन</string>
+          </resources>
+          EOF
+
+          cat > android-app/app/src/main/res/values/themes.xml <<'EOF'
+          <resources>
+              <style name="Theme.AnantAbhyas"
+                  parent="Theme.MaterialComponents.DayNight.NoActionBar" />
+          </resources>
+          EOF
+
+          cat > android-app/app/src/main/res/drawable/anant_logo.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+
+              <path
+                  android:fillColor="#38BDF8"
+                  android:pathData="M54,10 L94,90 L14,90 Z" />
+          </vector>
+          EOF
+
+          cat > android-app/app/src/main/res/layout/activity_splash.xml <<'EOF'
+          <FrameLayout
+              xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:background="#0F172A"
+              android:gravity="center">
+
+              <LinearLayout
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:gravity="center"
+                  android:orientation="vertical">
+
+                  <ImageView
+                      android:layout_width="108dp"
+                      android:layout_height="108dp"
+                      android:src="@drawable/anant_logo"
+                      android:contentDescription="@string/app_name" />
+
+                  <TextView
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="20dp"
+                      android:text="अनंत अभ्यास एडमिन"
+                      android:textColor="#FFFFFF"
+                      android:textSize="24sp"
+                      android:textStyle="bold" />
+
+              </LinearLayout>
+          </FrameLayout>
+          EOF
+
+          cat > android-app/app/src/main/java/com/anantabhyas/admin/SplashActivity.kt <<'EOF'
+          package com.anantabhyas.admin
+
+          import android.content.Intent
+          import android.os.Bundle
+          import android.os.Handler
+          import android.os.Looper
+          import androidx.appcompat.app.AppCompatActivity
+
+          class SplashActivity : AppCompatActivity() {
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+
+                  setContentView(R.layout.activity_splash)
+
+                  Handler(Looper.getMainLooper()).postDelayed({
+                      startActivity(
+                          Intent(this, MainActivity::class.java)
+                      )
+                      finish()
+                  }, 1200)
+              }
+          }
+          EOF
+
+          cat > android-app/app/src/main/java/com/anantabhyas/admin/MainActivity.kt <<'EOF'
+          package com.anantabhyas.admin
+
+          import android.Manifest
+          import android.content.Intent
+          import android.content.pm.PackageManager
+          import android.os.Bundle
+          import android.provider.ContactsContract
+          import android.view.View
+          import android.widget.*
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.core.app.ActivityCompat
+          import androidx.core.content.ContextCompat
+          import okhttp3.*
+          import okhttp3.MediaType.Companion.toMediaType
+          import okhttp3.RequestBody.Companion.toRequestBody
+          import org.json.JSONArray
+          import org.json.JSONObject
+          import java.io.IOException
+          import java.net.URLEncoder
+
+          class MainActivity : AppCompatActivity() {
+
+              private val BASE_URL =
+                  "https://anant-go-gateway.onrender.com"
+
+              private val client = OkHttpClient()
+
+              private lateinit var tvTotalActive: TextView
+              private lateinit var tvNewJoined: TextView
+              private lateinit var tvReferralCompleted: TextView
+              private lateinit var tvNewReferrals: TextView
+              private lateinit var etSearchKey: EditText
+              private lateinit var btnSearch: Button
+              private lateinit var cardResult: LinearLayout
+              private lateinit var tvKundaliData: TextView
+              private lateinit var btnSyncContacts: Button
+              private lateinit var btnShareWhatsApp: Button
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+
+                  setContentView(R.layout.activity_main)
+
+                  tvTotalActive =
+                      findViewById(R.id.tvTotalActive)
+
+                  tvNewJoined =
+                      findViewById(R.id.tvNewJoined)
+
+                  tvReferralCompleted =
+                      findViewById(R.id.tvReferralCompleted)
+
+                  tvNewReferrals =
+                      findViewById(R.id.tvNewReferrals)
+
+                  etSearchKey =
+                      findViewById(R.id.etSearchKey)
+
+                  btnSearch =
+                      findViewById(R.id.btnSearch)
+
+                  cardResult =
+                      findViewById(R.id.cardResult)
+
+                  tvKundaliData =
+                      findViewById(R.id.tvKundaliData)
+
+                  btnSyncContacts =
+                      findViewById(R.id.btnSyncContacts)
+
+                  btnShareWhatsApp =
+                      findViewById(R.id.btnShareWhatsApp)
+
+                  fetchAdminDashboardStats()
+
+                  btnShareWhatsApp.setOnClickListener {
+                      shareInviteLinkToParents()
+                  }
+
+                  btnSearch.setOnClickListener {
+                      val key =
+                          etSearchKey.text.toString().trim()
+
+                      if (key.isNotEmpty()) {
+                          searchStudentKundali(key)
+                      } else {
+                          Toast.makeText(
+                              this,
+                              "कृपया UID या फोन नंबर लिखें",
+                              Toast.LENGTH_SHORT
+                          ).show()
+                      }
+                  }
+
+                  btnSyncContacts.setOnClickListener {
+                      checkAndSyncContacts()
+                  }
+              }
+
+              private fun shareInviteLinkToParents() {
+
+                  val message = """
+                      🙏 राम राम सा!
+
+                      बच्चों के दैनिक बोलकर अभ्यास और डिजिटल मास्टरजी से जुड़ने के लिए नीचे दिए लिंक को WhatsApp पर भेजें:
+
+                      https://wa.me/919664006651?text=राम%20राम%20सा%2C%20मुझे%20अनंत%20अभ्यास%20का%20फ्री%20डेमो%20चाहिए
+
+                      कक्षा 1 से 12 तक - 7 दिन का फ्री डेमो
+                  """.trimIndent()
+
+                  val intent =
+                      Intent(Intent.ACTION_SEND).apply {
+                          type = "text/plain"
+                          putExtra(
+                              Intent.EXTRA_TEXT,
+                              message
+                          )
+                      }
+
+                  startActivity(
+                      Intent.createChooser(
+                          intent,
+                          "पेरेंट्स को WhatsApp लिंक भेजें"
+                      )
+                  )
+              }
+
+              private fun fetchAdminDashboardStats() {
+
+                  val request =
+                      Request.Builder()
+                          .url(
+                              "$BASE_URL/api/v1/admin/stats"
+                          )
+                          .build()
+
+                  client.newCall(request)
+                      .enqueue(object : Callback {
+
+                          override fun onFailure(
+                              call: Call,
+                              e: IOException
+                          ) {
+                              runOnUiThread {
+                                  tvTotalActive.text = "0"
+                                  tvNewJoined.text = "0"
+                                  tvReferralCompleted.text = "0"
+                                  tvNewReferrals.text = "0"
+                              }
+                          }
+
+                          override fun onResponse(
+                              call: Call,
+                              response: Response
+                          ) {
+
+                              response.use {
+
+                                  val body =
+                                      it.body?.string()
+                                          ?: return
+
+                                  if (!it.isSuccessful)
+                                      return
+
+                                  try {
+
+                                      val json =
+                                          JSONObject(body)
+
+                                      runOnUiThread {
+
+                                          tvTotalActive.text =
+                                              json.optInt(
+                                                  "total_active",
+                                                  0
+                                              ).toString()
+
+                                          tvNewJoined.text =
+                                              "+${json.optInt(
+                                                  "new_joined",
+                                                  0
+                                              )}"
+
+                                          tvReferralCompleted.text =
+                                              json.optInt(
+                                                  "referrals_completed",
+                                                  0
+                                              ).toString()
+
+                                          tvNewReferrals.text =
+                                              json.optInt(
+                                                  "new_referrals",
+                                                  0
+                                              ).toString()
+                                      }
+
+                                  } catch (_: Exception) {
+                                  }
+                              }
+                          }
+                      })
+              }
+
+              private fun searchStudentKundali(
+                  query: String
+              ) {
+
+                  val encoded =
+                      URLEncoder.encode(
+                          query,
+                          "UTF-8"
+                      )
+
+                  val request =
+                      Request.Builder()
+                          .url(
+                              "$BASE_URL/api/v1/admin/kundali?q=$encoded"
+                          )
+                          .build()
+
+                  client.newCall(request)
+                      .enqueue(object : Callback {
+
+                          override fun onFailure(
+                              call: Call,
+                              e: IOException
+                          ) {
+
+                              runOnUiThread {
+                                  Toast.makeText(
+                                      this@MainActivity,
+                                      "सर्वर कनेक्ट नहीं हुआ",
+                                      Toast.LENGTH_SHORT
+                                  ).show()
+                              }
+                          }
+
+                          override fun onResponse(
+                              call: Call,
+                              response: Response
+                          ) {
+
+                              response.use {
+
+                                  val body =
+                                      it.body?.string()
+                                          ?: ""
+
+                                  runOnUiThread {
+
+                                      if (it.isSuccessful) {
+
+                                          try {
+
+                                              val data =
+                                                  JSONObject(body)
+
+                                              cardResult.visibility =
+                                                  View.VISIBLE
+
+                                              tvKundaliData.text =
+                                                  """
+                                                  👤 छात्र: ${data.optString("student_name")}
+                                                  📚 कक्षा: ${data.optInt("class_level")}
+                                                  🆔 UID: ${data.optString("uid_badge")}
+                                                  👨‍👦 पिता: ${data.optString("parent_name")}
+                                                  📞 फोन: ${data.optString("parent_phone")}
+                                                  🌐 भाषा: ${data.optString("preferred_dialect")}
+                                                  💳 प्लान: ${data.optString("plan_type")}
+                                                  📊 स्कोर: ${data.optDouble("accuracy_percent")}%
+                                                  """.trimIndent()
+
+                                          } catch (_: Exception) {
+
+                                              cardResult.visibility =
+                                                  View.GONE
+
+                                              Toast.makeText(
+                                                  this@MainActivity,
+                                                  "सर्वर डेटा गलत है",
+                                                  Toast.LENGTH_SHORT
+                                              ).show()
+                                          }
+
+                                      } else {
+
+                                          cardResult.visibility =
+                                              View.GONE
+
+                                          Toast.makeText(
+                                              this@MainActivity,
+                                              "कोई रिकॉर्ड नहीं मिला",
+                                              Toast.LENGTH_SHORT
+                                          ).show()
+                                      }
+                                  }
+                              }
+                          }
+                      })
+              }
+
+              private fun checkAndSyncContacts() {
+
+                  if (
+                      ContextCompat.checkSelfPermission(
+                          this,
+                          Manifest.permission.READ_CONTACTS
+                      ) != PackageManager.PERMISSION_GRANTED
+                  ) {
+
+                      ActivityCompat.requestPermissions(
+                          this,
+                          arrayOf(
+                              Manifest.permission.READ_CONTACTS
+                          ),
+                          101
+                      )
+
+                  } else {
+
+                      readAndUploadContacts()
+                  }
+              }
+
+              override fun onRequestPermissionsResult(
+                  requestCode: Int,
+                  permissions: Array<out String>,
+                  grantResults: IntArray
+              ) {
+
+                  super.onRequestPermissionsResult(
+                      requestCode,
+                      pe
