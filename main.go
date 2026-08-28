@@ -53,22 +53,22 @@ const (
 )
 
 type StudentSession struct {
-	PhoneNumber      string
-	State            SessionState
-	TemporaryDemoID  string
-	PermanentUID     string
-	ChildName        string
-	Grade            int
-	Hobby            string
-	DemoStartDate    time.Time
-	DemoEndDate      time.Time
-	TestStartTime    time.Time
-	SelectedPlan     pricing.PlanTier
-	DailyScanLimit   int
-	ScansUsedToday   int
-	LastScanReset    time.Time
-	ValidTill        time.Time
-	LastActive       time.Time
+	PhoneNumber     string
+	State           SessionState
+	TemporaryDemoID string
+	PermanentUID    string
+	ChildName       string
+	Grade           int
+	Hobby           string
+	DemoStartDate   time.Time
+	DemoEndDate     time.Time
+	TestStartTime   time.Time
+	SelectedPlan    pricing.PlanTier
+	DailyScanLimit  int
+	ScansUsedToday  int
+	LastScanReset   time.Time
+	ValidTill       time.Time
+	LastActive      time.Time
 }
 
 type AdminFeedbackState struct {
@@ -155,6 +155,7 @@ func MasterWhatsAppGateway(fromPhone, messageBody string) string {
 	phone := strings.TrimPrefix(strings.TrimSpace(fromPhone), "+")
 	text := strings.TrimSpace(messageBody)
 	lower := strings.ToLower(text)
+	upper := strings.ToUpper(text)
 	now := clockEngine.Now()
 
 	// 1. एडमिन कंट्रोल (9024414973)
@@ -176,7 +177,7 @@ func MasterWhatsAppGateway(fromPhone, messageBody string) string {
 			adminControl.IsApproved = false
 			return fmt.Sprintf("🔧 [REVISION #%d RECORDED] \"%s\"\nरी-टेस्ट के लिए *TEST RUN* लिखें।", adminControl.RevisionCount, text)
 		}
-		if lower == "test run" || lower == "hi" {
+		if lower == "test run" || lower == "hi" || upper == "HI" || strings.HasPrefix(lower, "hi") {
 			snap := clockEngine.GetCurrentSnapshot()
 			return fmt.Sprintf("🧪 [ADMIN STAGING TEST]\n• समय (IST): %s\n• 20 कोर इंजन: सक्रिय\n\nलाइव करने हेतु लिखें: *SYSTEM APPROVED LIVE*\nबदलाव हेतु लिखें: *FIX: [कमी]*", snap.FormattedTimestamp)
 		}
@@ -196,20 +197,26 @@ func MasterWhatsAppGateway(fromPhone, messageBody string) string {
 	// 3. प्रो-राटा अपग्रेड (Basic -> Pro)
 	if session.State == StatePaidActive && session.SelectedPlan == pricing.TierBasic && (lower == "pro" || lower == "upgrade") {
 		daysRemaining := int(math.Ceil(time.Until(session.ValidTill).Hours() / 24))
-		if daysRemaining < 0 { daysRemaining = 0 }
+		if daysRemaining < 0 {
+			daysRemaining = 0
+		}
 		unusedBasic := float64(daysRemaining) * (399.0 / 30.0)
 		finalPayable := math.Round(699.0 - unusedBasic)
-		if finalPayable < 50 { finalPayable = 50 }
+		if finalPayable < 50 {
+			finalPayable = 50
+		}
 
 		return fmt.Sprintf("🚀 *Pro Plan अपग्रेड*\n• शेष दिन: %d | कटौती: -₹%.2f\n👉 *देय: ₹%.0f*\n\n%s",
 			daysRemaining, unusedBasic, finalPayable, buildDirectUPIPrompt(phone, session.ChildName, pricing.TierPro, finalPayable, session.PermanentUID))
 	}
 
 	// 4. पेमेंट वेरिफिकेशन व UID आवंटन
-	if strings.Contains(strings.ToUpper(text), "PAID") || strings.Contains(strings.ToUpper(text), "SUCCESS") || strings.Contains(strings.ToUpper(text), "DEMO-2026") || strings.Contains(strings.ToUpper(text), "ABHYAS-2026") {
+	if strings.Contains(upper, "PAID") || strings.Contains(upper, "SUCCESS") || strings.Contains(upper, "DEMO-2026") || strings.Contains(upper, "ABHYAS-2026") {
 		if session.PermanentUID == "" {
 			lastDigits := phone
-			if len(phone) >= 4 { lastDigits = phone[len(phone)-4:] }
+			if len(phone) >= 4 {
+				lastDigits = phone[len(phone)-4:]
+			}
 			session.PermanentUID = fmt.Sprintf("ABHYAS-2026-%s", lastDigits)
 		}
 		session.State = StatePaidActive
@@ -228,14 +235,14 @@ func MasterWhatsAppGateway(fromPhone, messageBody string) string {
 	// 5. 4-चरणीय ऑनबोर्डिंग
 	switch session.State {
 	case StateNew:
-		if strings.Contains(lower, "hi") || strings.Contains(lower, "hello") || strings.Contains(lower, "नमस्ते") {
+		if lower == "hi" || upper == "HI" || strings.HasPrefix(lower, "hi") || strings.Contains(lower, "hello") || strings.Contains(lower, "नमस्ते") || strings.Contains(lower, "start") {
 			session.State = StateAwaitingConsent
 			return "नमस्ते! 'अनंत अभ्यास' (RFMC Corporation) में आपका स्वागत है। 🎓\nक्या आप 7-दिन फ्री डेमो के लिए तैयार हैं? (हाँ / नहीं)"
 		}
 		return "नमस्ते! शुरू करने हेतु *Hi* भेजें।"
 
 	case StateAwaitingConsent:
-		if lower == "हाँ" || lower == "yes" || lower == "ha" {
+		if lower == "हाँ" || lower == "yes" || lower == "ha" || lower == "haa" || upper == "YES" || lower == "y" {
 			session.State = StateAwaitingDetails
 			return "कृपया बच्चे का *नाम, कक्षा (1-12) और हॉबी* लिखें:\n(उदा: राहुल, कक्षा 6, रोबोटिक्स)"
 		}
@@ -247,7 +254,9 @@ func MasterWhatsAppGateway(fromPhone, messageBody string) string {
 		session.ChildName = strings.TrimSpace(parts[0])
 		session.Grade = 6
 		session.Hobby = "General"
-		if len(parts) >= 3 { session.Hobby = strings.TrimSpace(parts[2]) }
+		if len(parts) >= 3 {
+			session.Hobby = strings.TrimSpace(parts[2])
+		}
 		session.State = StateInTest
 		session.TestStartTime = now
 		return fmt.Sprintf("धन्यवाद! %s का 2-मिनट टेस्ट:\nसवाल: 12 + 8 = 20 है, तो 35 - 15 = कितना होगा?", session.ChildName)
@@ -256,7 +265,9 @@ func MasterWhatsAppGateway(fromPhone, messageBody string) string {
 		duration := time.Since(session.TestStartTime).Seconds()
 		session.State = StateDemoActive
 		speed := "सामान्य"
-		if duration < 10 { speed = "असाधारण (Olympiad Fast Thinker)" }
+		if duration < 10 {
+			speed = "असाधारण (Olympiad Fast Thinker)"
+		}
 		return fmt.Sprintf("📊 *डायग्नोस्टिक रिपोर्ट*\n• छात्र: %s (कक्षा %d)\n• गति: %s\n• 🆔 डेमो ID: *%s*\n\n🎉 7-दिवसीय फ्री डेमो सक्रिय है! अभ्यास के लिए *START* लिखें।",
 			session.ChildName, session.Grade, speed, session.TemporaryDemoID)
 
@@ -265,10 +276,10 @@ func MasterWhatsAppGateway(fromPhone, messageBody string) string {
 			session.State = StateAwaitingPlan
 			return fmt.Sprintf("🎉 7-दिन डेमो पूरा हुआ! प्लान चुनें:\n[1] Basic (₹399 - 5 स्कैन/दिन)\n[2] Pro (₹699 - 12 स्कैन/दिन)\n\nDemo ID: *%s*", session.TemporaryDemoID)
 		}
-		if lower == "start" {
+		if lower == "start" || upper == "START" {
 			return fmt.Sprintf("📚 Day अभ्यास एक्टिव है (%s)। सवाल पूछें या फोटो भेजें।", session.ChildName)
 		}
-		return "अभ्यास के लिए *START* लिखें。"
+		return "अभ्यास के लिए *START* लिखें।"
 
 	case StateAwaitingPlan:
 		if lower == "1" || strings.Contains(lower, "basic") {
@@ -281,7 +292,7 @@ func MasterWhatsAppGateway(fromPhone, messageBody string) string {
 		return "विकल्प चुनें: 1 (Basic ₹399) या 2 (Pro ₹699)"
 
 	case StatePaidActive:
-		if lower == "start" {
+		if lower == "start" || upper == "START" {
 			return fmt.Sprintf("🌟 स्वागत है %s! %s एक्टिव है (%d स्कैन/दिन)। डायरी फोटो भेजें।", session.ChildName, session.SelectedPlan, session.DailyScanLimit)
 		}
 		return "मास्टरजी सक्रिय हैं! सवाल पूछें।"
@@ -292,23 +303,37 @@ func MasterWhatsAppGateway(fromPhone, messageBody string) string {
 func main() {
 	fmt.Println("🚀 'अनंत अभ्यास' 360° मास्टर प्रोडक्शन बैकएंड प्रारंभ हो रहा है...")
 
-	// 1. सर्वर को 24x7 जागता रखने के लिए Keep-Alive पिंग चालू करें
+	// 1. सर्वर को 24x7 सक्रिय रखने के लिए Keep-Alive पिंग चालू करें
 	go StartKeepAlive()
 
-	// 2. 20 इंजनों की बैकग्राउंड बाइंडिंग और डेटाबेस सेटअप
-	go func() {
-		connStr := os.Getenv("DATABASE_URL")
-		if connStr == "" {
-			connStr = "postgres://postgres:password@localhost:5432/anant_abhyas?sslmode=disable"
-		}
-		var db *sql.DB
-		defer func() {
-			if r := recover(); r != nil { log.Printf("⚠️ डीबी सूचना: %v", r) }
-		}()
-		db = database.InitDB(connStr)
-		if db != nil { defer db.Close() }
+	// 2. डेटाबेस कनेक्शन एवं ऑटो-माइग्रेशन (Direct & Safe Setup)
+	connStr := os.Getenv("DATABASE_URL")
+	if connStr == "" {
+		connStr = "postgres://postgres:password@localhost:5432/anant_abhyas?sslmode=disable"
+	}
 
-		// 20 इंजनों का इनिशियलाइज़ेशन
+	db, err := database.ConnectPostgres(connStr)
+	if err != nil {
+		log.Printf("⚠️ डेटाबेस कनेक्शन चेतावनी: %v", err)
+	} else {
+		log.Println("✅ PostgreSQL डेटाबेस से सफलतापूर्वक कनेक्ट हुआ।")
+
+		// 🚀 ऑटो-माइग्रेशन: schema.sql को लोड और निष्पादित करना
+		if err := database.AutoMigrateDatabase(db); err != nil {
+			log.Printf("⚠️ माइग्रेशन चेतावनी: %v", err)
+		} else {
+			log.Println("✅ सभी स्कीमा टेबल्स सत्यापित और अद्यतन हैं।")
+		}
+	}
+
+	// 3. 20 इंजनों की बैकग्राउंड बाइंडिंग
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("⚠️ डीबी रिकवरी सूचना: %v", r)
+			}
+		}()
+
 		_ = temporal.NewClockEngine()
 		_ = pricing.NewDemoService(db)
 		_ = pricing.NewPlanService(db)
@@ -344,10 +369,15 @@ func main() {
 		fmt.Println("✅ सभी 20 कोर इंजन सफलतापूर्वक बाइंड और सक्रिय हैं।")
 	}()
 
-	// 3. लाइव HTTP & Webhook राउट्स
+	// 4. लाइव HTTP & Webhook राउट्स
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, `<h2>🎓 अनंत अभ्यास (रॉयल एफएमसी कॉरपोरेशन) लाइव है 24x7!</h2><p><a href="/admin">एडमिन पोर्टल</a></p>`)
+	})
+
+	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
 	})
 
 	http.HandleFunc("/webhook", func(w http.ResponseWriter, r *http.Request) {
@@ -364,13 +394,14 @@ func main() {
 
 	http.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
 		snap := clockEngine.GetCurrentSnapshot()
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprintf(w, "<h2>अनंत अभ्यास एडमिन पोर्टल</h2><p>गेटवे: 9664006651 | एडमिन: 9024414973</p><p>समय (IST): %s</p>", snap.FormattedTimestamp)
 	})
 
-	// 4. पोर्ट बाइंडिंग और सर्वर स्टार्टअप
+	// 5. पोर्ट बाइंडिंग और सर्वर स्टार्टअप (Render के PORT एनवायरनमेंट के अनुसार)
 	port := os.Getenv("PORT")
-	if port == "" { 
-		port = "8080" 
+	if port == "" {
+		port = "8080"
 	}
 	log.Printf("🚀 अनंत अभ्यास सर्वर पोर्ट :%s पर सक्रिय है...", port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
