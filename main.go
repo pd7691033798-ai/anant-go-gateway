@@ -79,11 +79,16 @@ type AdminFeedbackState struct {
 }
 
 var (
-	adminControl = &AdminFeedbackState{IsApproved: false, RevisionCount: 1}
-	studentDB    = make(map[string]*StudentSession)
-	dbMutex      sync.RWMutex
-	clockEngine  = temporal.NewClockEngine()
+	adminControl  = &AdminFeedbackState{IsApproved: false, RevisionCount: 1}
+	studentDB     = make(map[string]*StudentSession)
+	dbMutex       sync.RWMutex
+	clockEngine   = temporal.NewClockEngine()
+	contactFilter *featurephone.ContactFilter
 )
+
+func init() {
+	contactFilter = featurephone.NewContactFilter()
+}
 
 // StartKeepAlive सर्वर को Render पर सोने से बचाने के लिए हर 10 मिनट में खुद को पिंग करेगा
 func StartKeepAlive() {
@@ -300,6 +305,43 @@ func MasterWhatsAppGateway(fromPhone, messageBody string) string {
 	return ""
 }
 
+// handleIncomingCommunication: स्मार्ट रूटिंग जो पर्सनल कॉन्टैक्ट्स को बाईपास और स्पैम को ब्लॉक करती है
+func handleIncomingCommunication(w http.ResponseWriter, r *http.Request) {
+	from := r.URL.Query().Get("from")
+	body := r.URL.Query().Get("body")
+	if from == "" {
+		from = r.FormValue("From")
+		body = r.FormValue("Body")
+	}
+
+	profile := contactFilter.CheckCaller(from)
+
+	// केस 1: पर्सनल संपर्क (दोस्त / रिश्तेदार / परिवार)
+	if profile.IsFriend {
+		fmt.Printf("[BYPASS] पर्सनल संपर्क पहचाना गया: %s (%s). AI बंद है।\n", profile.Name, from)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("NORMAL_ROUTING"))
+		return
+	}
+
+	// केस 2: स्पैमर या फ़र्ज़ी नंबर
+	if profile.IsSpam {
+		fmt.Printf("[BLOCKED] स्पैम नंबर ब्लॉक किया गया: %s\n", from)
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte("SPAM_REJECTED"))
+		return
+	}
+
+	// केस 3: नया अनजान कॉलर / छात्र -> MasterWhatsAppGateway के हवाले करें
+	fmt.Printf("[LEAD] नया छात्र / संपर्क: %s (%s)\n", profile.Name, from)
+	reply := MasterWhatsAppGateway(from, body)
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(reply))
+}
+
 func main() {
 	fmt.Println("🚀 'अनंत अभ्यास' 360° मास्टर प्रोडक्शन बैकएंड प्रारंभ हो रहा है...")
 
@@ -380,17 +422,9 @@ func main() {
 		w.Write([]byte("OK"))
 	})
 
-	http.HandleFunc("/webhook", func(w http.ResponseWriter, r *http.Request) {
-		from := r.URL.Query().Get("from")
-		body := r.URL.Query().Get("body")
-		if from == "" {
-			from = r.FormValue("From")
-			body = r.FormValue("Body")
-		}
-		reply := MasterWhatsAppGateway(from, body)
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Write([]byte(reply))
-	})
+	// /webhook और /incoming दोनों पर स्मार्ट फ़िल्टर हैंडलर लगाया गया है
+	http.HandleFunc("/webhook", handleIncomingCommunication)
+	http.HandleFunc("/incoming", handleIncomingCommunication)
 
 	http.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
 		snap := clockEngine.GetCurrentSnapshot()
