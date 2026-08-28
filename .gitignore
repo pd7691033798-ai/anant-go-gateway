@@ -1,14 +1,63 @@
+# ==========================================
+# 1. संकलित बाइनरी व निष्पादन योग्य फ़ाइलें (Binaries & Executables)
+# ==========================================
 *.exe
+*.exe~
 *.dll
 *.so
 *.dylib
 anant_core
 anant_abhyas_core
+bin/
+dist/
+
+# ==========================================
+# 2. पर्यावरण चर एवं संवेदनशील क्रेडेंशियल्स (Secrets & Environment)
+# ==========================================
+.env
+*.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.crt
+jwt_secrets.json
+service_account.json
+
+# ==========================================
+# 3. Android / Gradle / Kotlin बिल्ड आर्टिफैक्ट्स
+# ==========================================
 .gradle/
 build/
 app/build/
 *.iml
 .idea/
 local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+
+# ==========================================
+# 4. Go टूल्स, टेस्ट कवरेज एवं अस्थायी फ़ाइलें
+# ==========================================
+*.test
+*.out
+coverage.html
+vendor/
+
+# ==========================================
+# 5. ऑपरेटिंग सिस्टम एवं लॉग फ़ाइलें (OS & Logs)
+# ==========================================
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 *.log
+logs/
+temp/
+tmp/
