@@ -31,9 +31,11 @@ func NewExamSchedulerService(db *sql.DB) *ExamSchedulerService {
 	return &ExamSchedulerService{db: db}
 }
 
+// GetActiveExamMode: यूज़र के मैसेज या डेटाबेस शेड्यूल से एक्टिव एग्जाम मोड निकालता है
 func (e *ExamSchedulerService) GetActiveExamMode(phone, userRawText string) ExamStatus {
 	lower := strings.ToLower(userRawText)
 
+	// 1. यदि छात्र या अभिभावक सीधे मैसेज में टेस्ट की सूचना दें
 	if strings.Contains(lower, "कल टेस्ट") || strings.Contains(lower, "काल टेस्ट") || strings.Contains(lower, "कल पेपर") {
 		return ExamStatus{
 			ActiveMode:   ModeClassTestTomorrow,
@@ -43,6 +45,16 @@ func (e *ExamSchedulerService) GetActiveExamMode(phone, userRawText string) Exam
 		}
 	}
 
+	if e.db == nil {
+		return ExamStatus{
+			ActiveMode:   ModeRegular,
+			Subject:      "नियमित",
+			DaysToExam:   0,
+			ExamHeadline: "नियमित 15-मिनट अभ्यास",
+		}
+	}
+
+	// 2. डेटाबेस से शेड्यूल की जांच
 	today := time.Now().Format("2006-01-02")
 	var examType, subject string
 	var startDate time.Time
@@ -83,6 +95,7 @@ func (e *ExamSchedulerService) GetActiveExamMode(phone, userRawText string) Exam
 	}
 }
 
+// BuildExamAIPrompt: AI इंजन को परीक्षा मोड के अनुसार प्रॉम्प्ट तैयार करके देता है
 func (e *ExamSchedulerService) BuildExamAIPrompt(status ExamStatus) string {
 	switch status.ActiveMode {
 	case ModeClassTestTomorrow:
@@ -98,4 +111,12 @@ func (e *ExamSchedulerService) BuildExamAIPrompt(status ExamStatus) string {
 	default:
 		return "नियमित शैक्षणिक मूल्यांकन जारी रखें।"
 	}
+}
+
+// ActivateIntensiveRevision (P14): अल्टीमेट फैमिली प्लान के लिए 1 से 7-दिवसीय इंटेंसिव रिवीजन ट्रिगर
+func (ess *ExamSchedulerService) ActivateIntensiveRevision(phone string, examName string, days int) string {
+	if days <= 0 || days > 7 {
+		days = 7
+	}
+	return fmt.Sprintf("🎯 *%s इंटेंसिव रिवीजन मोड सक्रिय (Ultimate Family)!*\n• अवधि: अगले %d दिन\n• 4 छात्रों की संयुक्त प्रोग्रेस व पिछले वर्षों के पेपर्स पर फोकस।", examName, days)
 }
