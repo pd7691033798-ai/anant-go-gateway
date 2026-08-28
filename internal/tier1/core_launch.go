@@ -1,75 +1,17 @@
-package tier1
+type AccessStatus string
 
-import (
-	"context"
-	"database/sql"
-	"fmt"
-	"net/url"
-	"strings"
-	"time"
+const (
+	StatusActivePaid   AccessStatus = "ACTIVE_PAID"   // पेड सब्सक्रिप्शन एक्टिव
+	StatusActiveDemo   AccessStatus = "ACTIVE_DEMO"   // दिन 1-7 (फ्री डेमो)
+	StatusGracePeriod  AccessStatus = "GRACE_PERIOD"  // दिन 8-10 (3 दिन का ग्रेस पीरियड)
+	StatusExpired      AccessStatus = "EXPIRED"       // 10 दिन पूरे - सेवा बंद
 )
 
-type CoreLaunchSuite struct {
-	db *sql.DB
-}
-
-func NewCoreLaunchSuite(db *sql.DB) *CoreLaunchSuite {
-	return &CoreLaunchSuite{db: db}
-}
-
-// sanitizePhone 10 अंकों का शुद्ध नंबर निकालता है
-func sanitizePhone(phone string) string {
-	clean := strings.TrimPrefix(phone, "+91")
-	clean = strings.ReplaceAll(clean, " ", "")
-	clean = strings.ReplaceAll(clean, "-", "")
-	if len(clean) >= 10 {
-		return clean[len(clean)-10:]
-	}
-	return clean
-}
-
-func (c *CoreLaunchSuite) GeneratePaymentQR(parentPhone, planType string, monthNumber int) (string, float64) {
-	phone := sanitizePhone(parentPhone)
-	plan := strings.ToUpper(strings.TrimSpace(planType))
-
-	var baseAmount float64
-	switch plan {
-	case "PRO":
-		baseAmount = 699.0
-	case "FAMILY":
-		baseAmount = 1099.0
-	case "UNLIMITED_FAMILY":
-		baseAmount = 1499.0
-	default:
-		baseAmount = 399.0 // BASIC Plan
-	}
-
-	finalAmount := baseAmount
-	// 4थे, 8वें और 12वें महीने पर 25% छूट
-	if monthNumber == 4 || monthNumber == 8 || monthNumber == 12 {
-		finalAmount = baseAmount * 0.75
-	}
-
-	payeeVPA := "anantabhyas@upi"
-	payeeName := "Anant Abhyas"
-	transactionNote := fmt.Sprintf("Abhyas_M%d_%s", monthNumber, phone)
-
-	// सुरक्षित UPI URL फॉर्मेट
-	upiURI := fmt.Sprintf(
-		"upi://pay?pa=%s&pn=%s&am=%.2f&cu=INR&tn=%s",
-		url.QueryEscape(payeeVPA),
-		url.QueryEscape(payeeName),
-		finalAmount,
-		url.QueryEscape(transactionNote),
-	)
-
-	return upiURI, finalAmount
-}
-
-func (c *CoreLaunchSuite) CheckDemoEligibility(phone string) (bool, int, error) {
+// CheckAccessStatus 7 दिन डेमो + 3 दिन ग्रेस पीरियड की जांच करता है
+func (c *CoreLaunchSuite) CheckAccessStatus(phone string) (AccessStatus, int, error) {
 	cleanPhone := sanitizePhone(phone)
 	if len(cleanPhone) != 10 {
-		return false, 0, fmt.Errorf("अमान्य फ़ोन नंबर: %s", phone)
+		return StatusExpired, 0, fmt.Errorf("अमान्य फ़ोन नंबर: %s", phone)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -82,22 +24,29 @@ func (c *CoreLaunchSuite) CheckDemoEligibility(phone string) (bool, int, error) 
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			// बिल्कुल नया यूज़र - 7 दिन का फ़्री डेमो उपलब्ध
-			return true, 7, nil
+			// बिल्कुल नया छात्र: 7 दिन डेमो
+			return StatusActiveDemo, 7, nil
 		}
-		// असली डेटाबेस एरर
-		return false, 0, fmt.Errorf("डेमो पात्रता जांच विफल: %w", err)
+		return StatusExpired, 0, fmt.Errorf("स्टेटस जांच विफल: %w", err)
 	}
 
-	// यदि एक्टिव पेड सब्सक्रिप्शन है
+	// 1. यदि पेड प्लान चालू है
 	if isActive {
-		return true, 999, nil
+		return StatusActivePaid, 999, nil
 	}
 
-	// यदि 7 दिन पूरे हो चुके हैं
-	if daysUsed >= 7 {
-		return false, 0, nil
+	// 2. दिन 1 से 7: फ़्री डेमो
+	if daysUsed < 7 {
+		remainingDemoDays := 7 - daysUsed
+		return StatusActiveDemo, remainingDemoDays, nil
 	}
 
-	return true, 7 - daysUsed, nil
+	// 3. दिन 8 से 10 (कुल 10 दिन तक): 3 दिन का ग्रेस पीरियड
+	if daysUsed >= 7 && daysUsed < 10 {
+		remainingGraceDays := 10 - daysUsed
+		return StatusGracePeriod, remainingGraceDays, nil
+	}
+
+	// 4. 10 दिन पूरे: ट्रायल व ग्रेस समाप्त
+	return StatusExpired, 0, nil
 }
