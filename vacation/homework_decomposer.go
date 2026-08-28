@@ -10,6 +10,7 @@ import (
 
 type DecomposedPlan struct {
 	StudentPhone          string `json:"student_phone"`
+	State                 string `json:"state"`
 	TotalAssignedTasks    int    `json:"total_assigned_tasks"`
 	AllocatedVacationDays int    `json:"allocated_vacation_days"`
 	DailyTaskQuota        int    `json:"daily_task_quota"`
@@ -33,14 +34,19 @@ func NewHomeworkDecomposerService(db *sql.DB) *HomeworkDecomposerService {
 }
 
 // DecomposeHomework छुट्टियों के कुल होमवर्क को दैनिक छोटे कोटे में विभाजित करके डेटाबेस में सहेजता है
-func (h *HomeworkDecomposerService) DecomposeHomework(ctx context.Context, phone string, totalQuestions, vacationDays int) (*DecomposedPlan, error) {
+func (h *HomeworkDecomposerService) DecomposeHomework(ctx context.Context, phone, state string, totalQuestions, vacationDays int) (*DecomposedPlan, error) {
 	cleanPhone := strings.TrimSpace(phone)
 	if cleanPhone == "" {
 		return nil, errors.New("अमान्य फ़ोन नंबर")
 	}
 
+	cleanState := strings.TrimSpace(state)
+	if cleanState == "" {
+		cleanState = "Rajasthan"
+	}
+
 	if vacationDays <= 0 {
-		vacationDays = 35 // डिफ़ॉल्ट ग्रीष्मकालीन अवकाश अवधि
+		vacationDays = 35 // डिफ़ॉल्ट अवकाश अवधि
 	}
 
 	if totalQuestions <= 0 {
@@ -80,6 +86,7 @@ func (h *HomeworkDecomposerService) DecomposeHomework(ctx context.Context, phone
 
 	return &DecomposedPlan{
 		StudentPhone:          cleanPhone,
+		State:                 cleanState,
 		TotalAssignedTasks:    totalQuestions,
 		AllocatedVacationDays: vacationDays,
 		DailyTaskQuota:        dailyQuota,
@@ -87,19 +94,58 @@ func (h *HomeworkDecomposerService) DecomposeHomework(ctx context.Context, phone
 	}, nil
 }
 
-// IsSummerBreak जाँचता है कि क्या वर्तमान में ग्रीष्मकालीन अवकाश (17 मई से 30 जून) सक्रिय है
-func (h *HomeworkDecomposerService) IsSummerBreak() bool {
+// IsSummerBreak राज्य और क्षेत्रीय कैलेंडर के अनुसार ग्रीष्मकालीन अवकाश की पुष्टि करता है
+func (h *HomeworkDecomposerService) IsSummerBreak(state string) bool {
 	now := time.Now().In(h.loc)
 	month := int(now.Month())
 	day := now.Day()
-	return (month == 5 && day >= 17) || month == 6
+	cleanState := strings.TrimSpace(state)
+
+	switch cleanState {
+	case "Jammu and Kashmir", "Ladakh", "Himachal Pradesh":
+		// पहाड़ी राज्यों में गर्मियों की छुट्टियां छोटी (जुलाई में 1-2 हफ्ते) होती हैं
+		return month == 7 && (day >= 1 && day <= 15)
+
+	case "Maharashtra", "Gujarat", "Karnataka", "Tamil Nadu", "Kerala", "Andhra Pradesh", "Telangana":
+		// पश्चिम एवं दक्षिण भारत: 15 अप्रैल से मई के अंत तक
+		return (month == 4 && day >= 15) || month == 5
+
+	case "Rajasthan", "Haryana", "Punjab", "Delhi", "Uttar Pradesh", "Bihar", "Madhya Pradesh", "Uttarakhand":
+		// उत्तर भारत के मैदानी क्षेत्र: 17 मई से 30 जून
+		return (month == 5 && day >= 17) || month == 6
+
+	default:
+		// सामान्य डिफ़ॉल्ट
+		return (month == 5 && day >= 17) || month == 6
+	}
 }
 
-// IsWinterBreak जाँचता है कि क्या वर्तमान में शीतकालीन अवकाश (25 दिसंबर से 5 जनवरी) सक्रिय है
-func (h *HomeworkDecomposerService) IsWinterBreak() bool {
+// IsWinterBreak राज्य और जलवायु के अनुसार सटीक पैन-इंडिया शीतकालीन अवकाश की जाँच करता है
+func (h *HomeworkDecomposerService) IsWinterBreak(state string) bool {
 	now := time.Now().In(h.loc)
 	month := int(now.Month())
 	day := now.Day()
-	return (month == 12 && day >= 25) || (month == 1 && day <= 5)
-}
+	cleanState := strings.TrimSpace(state)
 
+	switch cleanState {
+	case "Jammu and Kashmir", "Ladakh", "Himachal Pradesh":
+		// पहाड़ी क्षेत्र: भारी बर्फबारी के कारण लंबा ब्रेक (15 दिसंबर से 28 फरवरी)
+		return (month == 12 && day >= 15) || month == 1 || month == 2
+
+	case "Rajasthan", "Haryana", "Punjab", "Delhi", "Uttar Pradesh", "Bihar", "Madhya Pradesh", "Uttarakhand":
+		// उत्तर भारत: कड़ाके की ठंड (25 दिसंबर से 15 जनवरी)
+		return (month == 12 && day >= 25) || (month == 1 && day <= 15)
+
+	case "Tamil Nadu", "Andhra Pradesh", "Telangana", "Karnataka":
+		// दक्षिण भारत: संक्रांति / पोंगल अवकाश (10 जनवरी से 18 जनवरी)
+		return month == 1 && (day >= 10 && day <= 18)
+
+	case "Maharashtra", "Gujarat":
+		// पश्चिम भारत: क्रिसमस / शीतकालीन ब्रेक (24 दिसंबर से 1 जनवरी)
+		return (month == 12 && day >= 24) || (month == 1 && day <= 1)
+
+	default:
+		// सामान्य डिफ़ॉल्ट
+		return (month == 12 && day >= 25) || (month == 1 && day <= 5)
+	}
+}
