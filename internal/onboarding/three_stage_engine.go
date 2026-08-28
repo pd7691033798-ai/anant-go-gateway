@@ -3,6 +3,7 @@ package onboarding
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 )
@@ -40,27 +41,48 @@ func NewThreeStageFormEngine(db *sql.DB) *ThreeStageFormEngine {
 	return &ThreeStageFormEngine{db: db}
 }
 
+// sanitizePhone 10 अंकों का शुद्ध नंबर देता है
+func sanitizePhone(phone string) string {
+	clean := strings.TrimPrefix(phone, "+91")
+	clean = strings.ReplaceAll(clean, " ", "")
+	clean = strings.ReplaceAll(clean, "-", "")
+	if len(clean) >= 10 {
+		return clean[len(clean)-10:]
+	}
+	return clean
+}
+
 func (t *ThreeStageFormEngine) ProcessUserInput(parentPhone, input string) string {
-	parentPhone = strings.TrimPrefix(parentPhone, "+91")
+	phone := sanitizePhone(parentPhone)
 	text := strings.TrimSpace(input)
+
+	if len(phone) != 10 {
+		return "⚠️ अमान्य मोबाइल नंबर। कृपया सही 10-अंकीय नंबर से संपर्क करें।"
+	}
 
 	var currentStage FormStage
 	query := `SELECT COALESCE(current_stage, 'S1_CHILD_NAME') FROM onboarding_sessions WHERE phone = $1`
-	err := t.db.QueryRow(query, parentPhone).Scan(&currentStage)
+	err := t.db.QueryRow(query, phone).Scan(&currentStage)
 
 	if err != nil {
-		t.initSession(parentPhone)
+		t.initSession(phone)
 		return "🙏 *नमस्कार! अनंत अभ्यास में आपका स्वागत है।*\n\n👉 सबसे पहले *बच्चे (छात्र) का शुभ नाम* बताएं:"
 	}
 
 	switch currentStage {
 	// ==================== स्टेज 1: परिचय व 28-राज्यों की भाषा चयन ====================
 	case Stage1_ChildName:
-		t.updateField(parentPhone, "child_name", text, Stage1_ParentName)
+		if text == "" {
+			return "कृपया बच्चे का नाम लिखकर भेजें:"
+		}
+		t.updateField(phone, "child_name", text, Stage1_ParentName)
 		return fmt.Sprintf("बेटा %s के *पिता/अभिभावक का पूरा नाम* बताएं:", text)
 
 	case Stage1_ParentName:
-		t.updateField(parentPhone, "parent_name", text, Stage1_LanguageSelect)
+		if text == "" {
+			return "कृपया पिता/अभिभावक का नाम लिखकर भेजें:"
+		}
+		t.updateField(phone, "parent_name", text, Stage1_LanguageSelect)
 		return strings.Join([]string{
 			"🌐 *अपने राज्य की भाषा या स्थानीय बोली चुनें (Pan-India 28 States):*",
 			"1. हिन्दी (Standard Hindi)",
@@ -85,71 +107,43 @@ func (t *ThreeStageFormEngine) ProcessUserInput(parentPhone, input string) strin
 		}, "\n")
 
 	case Stage1_LanguageSelect:
-		dialect := "HINDI"
-		switch text {
-		case "2":
-			dialect = "RAJASTHANI_BAGRI"
-		case "3":
-			dialect = "HARYANVI"
-		case "4":
-			dialect = "BHOJPURI"
-		case "5":
-			dialect = "MAITHILI"
-		case "6":
-			dialect = "PUNJABI"
-		case "7":
-			dialect = "CHHATTISGARHI"
-		case "8":
-			dialect = "PAHADI_GARHWALI"
-		case "9":
-			dialect = "BENGALI"
-		case "10":
-			dialect = "MARATHI"
-		case "11":
-			dialect = "TELUGU"
-		case "12":
-			dialect = "TAMIL"
-		case "13":
-			dialect = "GUJARATI"
-		case "14":
-			dialect = "KANNADA"
-		case "15":
-			dialect = "MALAYALAM"
-		case "16":
-			dialect = "ODIA"
-		case "17":
-			dialect = "ASSAMESE"
-		case "18":
-			dialect = "ENGLISH"
-		default:
+		dialectMap := map[string]string{
+			"1": "HINDI", "2": "RAJASTHANI_BAGRI", "3": "HARYANVI", "4": "BHOJPURI",
+			"5": "MAITHILI", "6": "PUNJABI", "7": "CHHATTISGARHI", "8": "PAHADI_GARHWALI",
+			"9": "BENGALI", "10": "MARATHI", "11": "TELUGU", "12": "TAMIL",
+			"13": "GUJARATI", "14": "KANNADA", "15": "MALAYALAM", "16": "ODIA",
+			"17": "ASSAMESE", "18": "ENGLISH",
+		}
+		dialect, exists := dialectMap[text]
+		if !exists {
 			dialect = "HINDI"
 		}
-		t.updateField(parentPhone, "preferred_dialect", dialect, Stage2_DutyHours)
+		t.updateField(phone, "preferred_dialect", dialect, Stage2_DutyHours)
 		return "आप रोज़ाना कितने घंटे काम/ड्यूटी पर रहते हैं? (उदा. 8, 10 या 12 घंटे):"
 
 	// ==================== स्टेज 2: पेरेंट कंट्रोल्स ====================
 	case Stage2_DutyHours:
-		t.updateField(parentPhone, "duty_hours", text, Stage2_DutyShift)
+		t.updateField(phone, "duty_hours", text, Stage2_DutyShift)
 		return "आपकी ड्यूटी किस समय रहती है?\n1. दिन में\n2. रात में"
 
 	case Stage2_DutyShift:
-		t.updateField(parentPhone, "duty_shift", text, Stage2_PhoneTimeDaily)
+		t.updateField(phone, "duty_shift", text, Stage2_PhoneTimeDaily)
 		return "आप बच्चे को पढ़ाई के लिए दिन में कुल कितने समय फोन दे सकते हैं? (उदा. 60 मिनट):"
 
 	case Stage2_PhoneTimeDaily:
-		t.updateField(parentPhone, "phone_time_minutes", text, Stage2_Biometrics)
+		t.updateField(phone, "phone_time_minutes", text, Stage2_Biometrics)
 		return "🔒 *सुरक्षा:* क्या आप ऐप लॉक के लिए Face/Fingerprint स्कैन लगाना चाहेंगे?\n1. हाँ\n2. नहीं"
 
 	case Stage2_Biometrics:
 		if text == "2" || strings.ToLower(text) == "नहीं" {
-			t.updateField(parentPhone, "biometrics_opted", "FALSE", Stage2_ParentPIN)
+			t.updateField(phone, "biometrics_opted", "FALSE", Stage2_ParentPIN)
 			return "कृपया अपना *6-अंकीय पेरेंट सुरक्षा PIN* सेट करें (उदा. 123456):"
 		}
-		t.updateField(parentPhone, "biometrics_opted", "TRUE", Stage2_DeviceType)
+		t.updateField(phone, "biometrics_opted", "TRUE", Stage2_DeviceType)
 		return "घर में अभ्यास के लिए कौन सा फोन उपयोग करेंगे?\n1. Android\n2. iPhone\n3. Feature Phone (कीपैड)"
 
 	case Stage2_ParentPIN:
-		t.updateField(parentPhone, "parent_pin", text, Stage2_DeviceType)
+		t.updateField(phone, "parent_pin", text, Stage2_DeviceType)
 		return "PIN सेट हुआ। अभ्यास के लिए कौन सा फोन उपयोग करेंगे?\n1. Android\n2. iPhone\n3. Feature Phone (कीपैड)"
 
 	case Stage2_DeviceType:
@@ -159,19 +153,19 @@ func (t *ThreeStageFormEngine) ProcessUserInput(parentPhone, input string) strin
 		} else if text == "3" {
 			dev = "FEATURE_PHONE"
 		}
-		t.updateField(parentPhone, "device_type", dev, Stage2_ExtraTime)
+		t.updateField(phone, "device_type", dev, Stage2_ExtraTime)
 		return "समय सीमा पूरी होने के बाद क्या आप अतिरिक्त समय देंगे?\n1. बिल्कुल नहीं (0 मिनट)\n2. 5 मिनट\n3. 10 मिनट"
 
 	case Stage2_ExtraTime:
-		t.updateField(parentPhone, "extra_time_allowed", text, Stage2_ReportConsent)
+		t.updateField(phone, "extra_time_allowed", text, Stage2_ReportConsent)
 		return "क्या अभ्यास के बाद दैनिक प्रोग्रेस रिपोर्ट WhatsApp पर देखना चाहेंगे?\n1. हाँ\n2. नहीं"
 
 	case Stage2_ReportConsent:
-		t.updateField(parentPhone, "report_consent", text, Stage2_Suggestion)
+		t.updateField(phone, "report_consent", text, Stage2_Suggestion)
 		return "📝 *सुझाव बॉक्स:* हमारे लिए कोई सुझाव हो तो लिखकर भेजें (या 'कोई नहीं' लिखें):"
 
 	case Stage2_Suggestion:
-		t.updateField(parentPhone, "suggestion_text", text, Stage3_ClassLevel)
+		t.updateField(phone, "suggestion_text", text, Stage3_ClassLevel)
 		return "बच्चा कौन सी कक्षा में पढ़ता है? (कक्षा *1 से 12* में से केवल नंबर दर्ज करें, उदा. 5, 8, 10):"
 
 	// ==================== स्टेज 3: कक्षा चयन व सत्यापन ====================
@@ -180,7 +174,7 @@ func (t *ThreeStageFormEngine) ProcessUserInput(parentPhone, input string) strin
 		if err != nil || classNum < 1 || classNum > 12 {
 			return "⚠️ केवल *1 से 12* के बीच का नंबर लिखें (उदा. 5, 10 या 12):"
 		}
-		t.updateField(parentPhone, "class_level", text, Stage3_ClassVerifyMode)
+		t.updateField(phone, "class_level", text, Stage3_ClassVerifyMode)
 		nextClass := classNum + 1
 		if classNum == 12 {
 			nextClass = 12
@@ -195,30 +189,38 @@ func (t *ThreeStageFormEngine) ProcessUserInput(parentPhone, input string) strin
 		} else if text == "3" {
 			learningMode = "ADVANCE_CURIOUS_USER"
 		}
-		t.updateField(parentPhone, "learning_intent", learningMode, Stage3_SchoolName)
+		t.updateField(phone, "learning_intent", learningMode, Stage3_SchoolName)
 		return "बच्चे के स्कूल/विद्यालय का नाम क्या है?"
 
 	case Stage3_SchoolName:
-		t.updateField(parentPhone, "school_name", text, Stage3_TotalSubjects)
+		t.updateField(phone, "school_name", text, Stage3_TotalSubjects)
 		return "बच्चे के मुख्य विषय कितने हैं? (उदा. 3, 5, 6):"
 
 	case Stage3_TotalSubjects:
-		t.updateField(parentPhone, "total_subjects", text, Stage3_BoardName)
+		t.updateField(phone, "total_subjects", text, Stage3_BoardName)
 		return "बच्चे का बोर्ड कौन सा है?\n1. RBSE (राजस्थान बोर्ड)\n2. CBSE\n3. अन्य राज्य बोर्ड"
 
 	case Stage3_BoardName:
-		t.updateField(parentPhone, "board_name", text, Stage3_PincodeGeo)
+		t.updateField(phone, "board_name", text, Stage3_PincodeGeo)
 		return "📍 अपने इलाके का *6-अंकीय पिनकोड* दर्ज करें (उदा. 335001):"
 
 	case Stage3_PincodeGeo:
-		t.updateField(parentPhone, "pincode", text, Stage3_TotalSiblings)
+		t.updateField(phone, "pincode", text, Stage3_TotalSiblings)
 		return "घर में इस फोन पर कुल कितने बच्चे अभ्यास करेंगे? (उदा. 1, 2, 3, 4):"
 
 	case Stage3_TotalSiblings:
 		siblingsCount := 1
-		fmt.Sscanf(text, "%d", &siblingsCount)
-		badgeCode := fmt.Sprintf("ABHYAS-INDIA-2026-%s", parentPhone[len(parentPhone)-4:])
-		t.finalizeProfile(parentPhone, badgeCode, siblingsCount)
+		parsed, err := strconv.Atoi(text)
+		if err == nil && parsed > 0 && parsed <= 6 {
+			siblingsCount = parsed
+		}
+
+		suffix := phone
+		if len(phone) >= 4 {
+			suffix = phone[len(phone)-4:]
+		}
+		badgeCode := fmt.Sprintf("ABHYAS-INDIA-2026-%s", suffix)
+		t.finalizeProfile(phone, badgeCode, siblingsCount)
 
 		timePerChild := 60 / siblingsCount
 		if siblingsCount > 1 {
@@ -226,25 +228,70 @@ func (t *ThreeStageFormEngine) ProcessUserInput(parentPhone, input string) strin
 				badgeCode, siblingsCount, timePerChild, timePerChild)
 		}
 		return fmt.Sprintf("🎉 *पंजीकरण पूर्ण!*\n\n🆔 *लाइफटाइम बैच कोड (UID):* `%s`\n🎁 *7-दिन का फ्री डेमो सक्रिय है (कक्षा 1 से 12 तक)।*\n\nअभ्यास के लिए 9664006651 पर मिसकॉल दें।", badgeCode)
+
+	case Stage_Completed:
+		return "✅ आपका पंजीकरण पहले ही पूरा हो चुका है। दैनिक 15-मिनट अभ्यास शुरू करने के लिए 9664006651 पर मिस्ड कॉल दें या 'START' लिखकर भेजें।"
 	}
 
 	return "कृपया सही विकल्प चुनकर उत्तर दें।"
 }
 
 func (t *ThreeStageFormEngine) initSession(phone string) {
-	_, _ = t.db.Exec(`INSERT INTO onboarding_sessions (phone, current_stage, created_at) VALUES ($1, 'S1_CHILD_NAME', NOW()) ON CONFLICT (phone) DO UPDATE SET current_stage = 'S1_CHILD_NAME'`, phone)
+	query := `
+		INSERT INTO onboarding_sessions (phone, current_stage, created_at) 
+		VALUES ($1, 'S1_CHILD_NAME', NOW()) 
+		ON CONFLICT (phone) DO UPDATE SET current_stage = 'S1_CHILD_NAME'`
+	if _, err := t.db.Exec(query, phone); err != nil {
+		log.Printf("❌ [ThreeStageEngine] initSession DB Error: %v", err)
+	}
 }
 
 func (t *ThreeStageFormEngine) updateField(phone, column, value string, nextStage FormStage) {
-	query := fmt.Sprintf(`UPDATE onboarding_sessions SET %s = $1, current_stage = $2 WHERE phone = $3`, column)
-	_, _ = t.db.Exec(query, value, nextStage, phone)
+	// सुरक्षित कॉलम व्हॉइटलिस्टिंग
+	allowedColumns := map[string]bool{
+		"child_name": true, "parent_name": true, "preferred_dialect": true,
+		"duty_hours": true, "duty_shift": true, "phone_time_minutes": true,
+		"biometrics_opted": true, "parent_pin": true, "device_type": true,
+		"extra_time_allowed": true, "report_consent": true, "suggestion_text": true,
+		"class_level": true, "learning_intent": true, "school_name": true,
+		"total_subjects": true, "board_name": true, "pincode": true,
+	}
+
+	if !allowedColumns[column] {
+		log.Printf("❌ [ThreeStageEngine] अवैध कॉलम अपडेट का प्रयास: %s", column)
+		return
+	}
+
+	query := fmt.Sprintf(`UPDATE onboarding_sessions SET %s = $1, current_stage = $2, updated_at = NOW() WHERE phone = $3`, column)
+	if _, err := t.db.Exec(query, value, nextStage, phone); err != nil {
+		log.Printf("❌ [ThreeStageEngine] updateField DB Error (%s): %v", column, err)
+	}
 }
 
 func (t *ThreeStageFormEngine) finalizeProfile(phone, badgeCode string, siblings int) {
-	query := `
-		UPDATE onboarding_sessions SET current_stage = 'STAGE_COMPLETED', total_children = $2 WHERE phone = $1;
+	tx, err := t.db.Begin()
+	if err != nil {
+		log.Printf("❌ [ThreeStageEngine] finalizeProfile TX Begin Error: %v", err)
+		return
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`UPDATE onboarding_sessions SET current_stage = 'STAGE_COMPLETED', total_children = $1 WHERE phone = $2`, siblings, phone)
+	if err != nil {
+		log.Printf("❌ [ThreeStageEngine] finalizeProfile session update error: %v", err)
+		return
+	}
+
+	_, err = tx.Exec(`
 		INSERT INTO users (phone, uid_badge, is_active, demo_days_used, total_children)
-		VALUES ($1, $3, TRUE, 0, $2)
-		ON CONFLICT (phone) DO UPDATE SET uid_badge = $3, total_children = $2;`
-	_, _ = t.db.Exec(query, phone, siblings, badgeCode)
+		VALUES ($1, $2, TRUE, 0, $3)
+		ON CONFLICT (phone) DO UPDATE SET uid_badge = $2, total_children = $3`, phone, badgeCode, siblings)
+	if err != nil {
+		log.Printf("❌ [ThreeStageEngine] finalizeProfile user upsert error: %v", err)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("❌ [ThreeStageEngine] finalizeProfile commit error: %v", err)
+	}
 }
