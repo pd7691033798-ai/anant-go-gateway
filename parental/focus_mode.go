@@ -36,3 +36,18 @@ func (c *ChildFocusSession) HandleCallEnded() string {
 	return fmt.Sprintf("🔒 [FOCUS RESTORED] कॉल समाप्त। %s मोड पुनः सक्रिय। अभ्यास जारी रखें।", c.SelectedMode)
 }
 
+// parental/focus_mode.go के सबसे नीचे जोड़ें:
+
+// RunFocusDemo: main.go से सीधे कॉल करने के लिए सिंगल एंट्री पॉइंट
+func RunFocusDemo() {
+	session := &ChildFocusSession{
+		StudentID:    "STUDENT-101",
+		SelectedMode: ModeRestricted,
+		IsAppLocked:  true,
+		RemainingSec: 900,
+	}
+
+	fmt.Printf("✅ [Parental] मोड: %s | स्क्रीन लॉक: %t\n", session.SelectedMode, session.IsAppLocked)
+	fmt.Printf("   %s\n", session.HandleIncomingCall())
+	fmt.Printf("   %s\n", session.HandleCallEnded())
+}
