@@ -345,7 +345,12 @@ func handleIncomingCommunication(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	fmt.Println("🚀 'अनंत अभ्यास' 360° मास्टर प्रोडक्शन बैकएंड प्रारंभ हो रहा है...")
-
+// --------------------------------------------------
+	// मास्टर इंजन और पैरेंटल फोकस डेमो इनिशियलाइज़ेशन
+	// --------------------------------------------------
+	_ = engine.GetJournal()
+	parental.RunFocusDemo()
+	fmt.Println("🚀 सिस्टम पूरी तरह चालू है!")
 	// 1. सर्वर को 24x7 सक्रिय रखने के लिए Keep-Alive पिंग चालू करें
 	go StartKeepAlive()
 
