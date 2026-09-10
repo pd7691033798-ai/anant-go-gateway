@@ -3,7 +3,7 @@ name: Build Anant Abhyas APKs
 on:
   push:
     branches: [ main, master ]
-  workflow_dispatch: # मैन्युअल 1-क्लिक रन के लिए
+  workflow_dispatch:
 
 jobs:
   build:
@@ -24,21 +24,40 @@ jobs:
         with:
           channel: 'stable'
 
-      # 1. स्टूडेंट Kiosk ऐप का APK बनाना
+      # 1. स्टूडेंट Kiosk ऐप का शुद्ध ढाँचा तैयार करना और APK बनाना
       - name: Build Student App APK
         run: |
+          # मौजूदा कोड को सुरक्षित रखना
+          mkdir -p /tmp/student_src
+          cp -r anant_student_app/* /tmp/student_src/ || true
+          rm -rf anant_student_app
+
+          # पूर्ण Android ढाँचे के साथ नया प्रोजेक्ट बनाना
+          flutter create anant_student_app --project-name anant_student_app --platforms=android
+
+          # आपकी main.dart और pubspec.yaml को वापस डालना
+          cp -rf /tmp/student_src/* anant_student_app/
+          
           cd anant_student_app
           flutter pub get
           flutter build apk --release
 
-      # 2. एडमिन टेलीमेट्री ऐप का APK बनाना
+      # 2. एडमिन टेलीमेट्री ऐप का शुद्ध ढाँचा तैयार करना और APK बनाना
       - name: Build Admin App APK
         run: |
+          mkdir -p /tmp/admin_src
+          cp -r anant_admin_app/* /tmp/admin_src/ || true
+          rm -rf anant_admin_app
+
+          flutter create anant_admin_app --project-name anant_admin_app --platforms=android
+
+          cp -rf /tmp/admin_src/* anant_admin_app/
+
           cd anant_admin_app
           flutter pub get
           flutter build apk --release
 
-      # 3. दोनों APK को डाउनलोड हेतु अपलोड करना
+      # 3. APK फ़ाइलें डाउनलोड के लिए अपलोड करना
       - name: Upload Student APK
         uses: actions/upload-artifact@v4
         with:
@@ -50,4 +69,3 @@ jobs:
         with:
           name: Anant-Admin-Dashboard-App
           path: anant_admin_app/build/app/outputs/flutter-apk/app-release.apk
-          
