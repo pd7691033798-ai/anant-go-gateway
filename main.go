@@ -48,8 +48,8 @@ const (
 	AdminNumber      = "9024414973"
 	GatewayNumber    = "9664006651"
 	MerchantVPA      = "9664006651@ptsbi"
-	MerchantName     = "रॉयल एफएमसी कॉरपोरेशन"
-	BrandDisplayName = "अनंत अभ्यास"
+	MerchantName     = "Royal fmc corporation"
+	BrandDisplayName = "Anant abhyas"
 )
 
 type SessionState string
