@@ -1,0 +1,53 @@
+name: Build Anant Abhyas APKs
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch: # मैन्युअल 1-क्लिक रन के लिए
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      # 1. स्टूडेंट Kiosk ऐप का APK बनाना
+      - name: Build Student App APK
+        run: |
+          cd anant_student_app
+          flutter pub get
+          flutter build apk --release
+
+      # 2. एडमिन टेलीमेट्री ऐप का APK बनाना
+      - name: Build Admin App APK
+        run: |
+          cd anant_admin_app
+          flutter pub get
+          flutter build apk --release
+
+      # 3. दोनों APK को डाउनलोड हेतु अपलोड करना
+      - name: Upload Student APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Anant-Student-Kiosk-App
+          path: anant_student_app/build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Upload Admin APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Anant-Admin-Dashboard-App
+          path: anant_admin_app/build/app/outputs/flutter-apk/app-release.apk
+          
