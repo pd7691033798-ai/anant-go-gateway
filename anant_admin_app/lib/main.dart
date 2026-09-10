@@ -116,9 +116,7 @@ class _AdminUnifiedDashboardState extends State<AdminUnifiedDashboard> with Sing
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
-                  
-mainAxisAlignment: MainAxisAlignment.spaceBetween,
-
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween, // <-- यहाँ सुधार दिया गया है
                   children: [
                     Text(s["name"], style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
                     Chip(label: Text(s["wing"], style: const TextStyle(color: Colors.white, fontSize: 11)), backgroundColor: Colors.indigo),
@@ -182,4 +180,3 @@ mainAxisAlignment: MainAxisAlignment.spaceBetween,
     );
   }
 }
-
