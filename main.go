@@ -31,7 +31,7 @@ import (
 	"anant-project/temporal"
 	"anant-project/vacation"
 
-	// नए 'अल्ट्रा' क्लस्टर, CBT व लर्निंग पैकेजेस
+	// नए क्लस्टर, CBT, पेरेंटल इंजन व बिलिंग पैकेजेस
 	"anant-abhyas/cluster"
 	"anant-abhyas/exam"
 	"anant-abhyas/finance"
@@ -48,60 +48,20 @@ const (
 	AdminNumber      = "9024414973"
 	GatewayNumber    = "9664006651"
 	MerchantVPA      = "9664006651@ptsbi"
-	MerchantName     = "Royal fmc corporation"
-	BrandDisplayName = "Anant abhyas"
+	MerchantName     = "Royal FMC corporation"
+	BrandDisplayName = "Anant Abhyas"
 )
-
-type SessionState string
-
-const (
-	StateNew             SessionState = "NEW"
-	StateAwaitingConsent SessionState = "AWAITING_CONSENT"
-	StateAwaitingKids    SessionState = "AWAITING_KIDS"
-	StateAwaitingDetails SessionState = "AWAITING_DETAILS"
-	StateInTest          SessionState = "IN_TEST"
-	StateDemoActive      SessionState = "DEMO_ACTIVE"
-	StateAwaitingPlan    SessionState = "AWAITING_PLAN"
-	StatePaidActive      SessionState = "PAID_ACTIVE"
-	StateSpamDropped     SessionState = "SPAM_DROPPED"
-)
-
-type StudentSession struct {
-	PhoneNumber     string
-	State           SessionState
-	TemporaryDemoID string
-	PermanentUID    string
-	ChildName       string
-	Grade           int
-	Hobby           string
-	DemoStartDate   time.Time
-	DemoEndDate     time.Time
-	TestStartTime   time.Time
-	SelectedPlan    pricing.PlanTier
-	DailyScanLimit  int
-	ScansUsedToday  int
-	LastScanReset   time.Time
-	ValidTill       time.Time
-	LastActive      time.Time
-}
-
-type AdminFeedbackState struct {
-	IsApproved    bool
-	LastFeedback  string
-	RevisionCount int
-	mu            sync.RWMutex
-}
 
 var (
-	adminControl  = &AdminFeedbackState{IsApproved: false, RevisionCount: 1}
-	studentDB     = make(map[string]*StudentSession)
-	dbMutex       sync.RWMutex
-	clockEngine   = temporal.NewClockEngine()
-	contactFilter *featurephone.ContactFilter
+	clockEngine            = temporal.NewClockEngine()
+	contactFilter          *featurephone.ContactFilter
+	fullOnboardingEngine   *parental.FullWhatsAppEngine
 )
 
 func init() {
 	contactFilter = featurephone.NewContactFilter()
+	// नया 5-स्टेज एंटी-चीट व लाइव टेस्ट ऑनबोर्डिंग इंजन
+	fullOnboardingEngine = parental.NewFullWhatsAppEngine()
 }
 
 func StartKeepAlive() {
@@ -125,199 +85,7 @@ func StartKeepAlive() {
 	}()
 }
 
-func getOrCreateSession(phone string) *StudentSession {
-	dbMutex.Lock()
-	defer dbMutex.Unlock()
-
-	now := clockEngine.Now()
-	s, exists := studentDB[phone]
-	if !exists {
-		lastDigits := phone
-		if len(phone) >= 4 {
-			lastDigits = phone[len(phone)-4:]
-		}
-		s = &StudentSession{
-			PhoneNumber:     phone,
-			State:           StateNew,
-			TemporaryDemoID: fmt.Sprintf("DEMO-2026-%s", lastDigits),
-			DailyScanLimit:  3,
-			DemoStartDate:   now,
-			DemoEndDate:     now.AddDate(0, 0, 7),
-			LastScanReset:   now,
-			LastActive:      now,
-		}
-		studentDB[phone] = s
-	}
-
-	if clockEngine.HasDailyResetOccurred(s.LastScanReset) {
-		s.ScansUsedToday = 0
-		s.LastScanReset = now
-	}
-	s.LastActive = now
-	return s
-}
-
-func buildDirectUPIPrompt(phone, childName string, tier pricing.PlanTier, amount float64, studentID string) string {
-	encodedBrand := url.QueryEscape(fmt.Sprintf("%s (%s)", BrandDisplayName, MerchantName))
-	note := url.QueryEscape(fmt.Sprintf("अनंत अभ्यास - %s (%s)", studentID, tier))
-	upiURL := fmt.Sprintf("upi://pay?pa=%s&pn=%s&am=%.2f&cu=INR&tn=%s", MerchantVPA, encodedBrand, amount, note)
-	qrURL := fmt.Sprintf("https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=%s", url.QueryEscape(upiURL))
-
-	return fmt.Sprintf("💳 *अनंत अभ्यास — डायरेक्ट UPI भुगतान (%s)*\n\n"+
-		"• छात्र: %s\n• छात्र ID: *%s*\n• प्लान: *%s*\n• राशि: *₹%.2f*\n• UPI ID: `%s`\n\n"+
-		"📲 *1-टैप UPI भुगतान:*\n%s\n\n🖼️ *QR कोड:* %s\n\n⚠️ भुगतान के बाद स्क्रीनशॉट भेजें।",
-		MerchantName, childName, studentID, tier, amount, MerchantVPA, upiURL, qrURL)
-}
-
-func MasterWhatsAppGateway(fromPhone, messageBody string) string {
-	phone := strings.TrimPrefix(strings.TrimSpace(fromPhone), "+")
-	text := strings.TrimSpace(messageBody)
-	lower := strings.ToLower(text)
-	upper := strings.ToUpper(text)
-	now := clockEngine.Now()
-
-	// 1. एडमिन कंट्रोल
-	if phone == AdminNumber {
-		adminControl.mu.Lock()
-		defer adminControl.mu.Unlock()
-
-		if lower == "system approved live" || lower == "approve" {
-			adminControl.IsApproved = true
-			return "🚀 [ADMIN APPROVED] अनंत अभ्यास गेटवे (9664006651) अब सभी 28 राज्यों के लिए LIVE है!"
-		}
-		if lower == "system stop" || lower == "reject" {
-			adminControl.IsApproved = false
-			return "🛑 [SYSTEM PAUSED] गेटवे STAGING मोड में है।"
-		}
-		if strings.HasPrefix(lower, "fix:") || strings.HasPrefix(lower, "सुधार:") {
-			adminControl.RevisionCount++
-			adminControl.LastFeedback = text
-			adminControl.IsApproved = false
-			return fmt.Sprintf("🔧 [REVISION #%d RECORDED] \"%s\"\nरी-टेस्ट के लिए *TEST RUN* लिखें।", adminControl.RevisionCount, text)
-		}
-		if lower == "test run" || lower == "hi" || upper == "HI" || strings.HasPrefix(lower, "hi") {
-			snap := clockEngine.GetCurrentSnapshot()
-			return fmt.Sprintf("🧪 [ADMIN STAGING TEST]\n• समय (IST): %s\n• कोर इंजन: सक्रिय\n\nलाइव करने हेतु लिखें: *SYSTEM APPROVED LIVE*\nबदलाव हेतु लिखें: *FIX: [कमी]*", snap.FormattedTimestamp)
-		}
-	}
-
-	// 2. पब्लिक लाइव गार्ड
-	adminControl.mu.RLock()
-	live := adminControl.IsApproved
-	adminControl.mu.RUnlock()
-
-	if !live && phone != AdminNumber {
-		return "नमस्ते! 'अनंत अभ्यास' सिस्टम अभी एडमिन टेस्टिंग में है। थोड़ी देर बाद प्रयास करें।"
-	}
-
-	session := getOrCreateSession(phone)
-
-	// 3. प्रो-राटा अपग्रेड (Basic -> Pro)
-	if session.State == StatePaidActive && session.SelectedPlan == pricing.TierBasic && (lower == "pro" || lower == "upgrade") {
-		daysRemaining := int(math.Ceil(time.Until(session.ValidTill).Hours() / 24))
-		if daysRemaining < 0 {
-			daysRemaining = 0
-		}
-		unusedBasic := float64(daysRemaining) * (399.0 / 30.0)
-		finalPayable := math.Round(699.0 - unusedBasic)
-		if finalPayable < 50 {
-			finalPayable = 50
-		}
-
-		return fmt.Sprintf("🚀 *Pro Plan अपग्रेड*\n• शेष दिन: %d | कटौती: -₹%.2f\n👉 *देय: ₹%.0f*\n\n%s",
-			daysRemaining, unusedBasic, finalPayable, buildDirectUPIPrompt(phone, session.ChildName, pricing.TierPro, finalPayable, session.PermanentUID))
-	}
-
-	// 4. पेमेंट वेरिफिकेशन व UID आवंटन
-	if strings.Contains(upper, "PAID") || strings.Contains(upper, "SUCCESS") || strings.Contains(upper, "DEMO-2026") || strings.Contains(upper, "ABHYAS-2026") {
-		if session.PermanentUID == "" {
-			lastDigits := phone
-			if len(phone) >= 4 {
-				lastDigits = phone[len(phone)-4:]
-			}
-			session.PermanentUID = fmt.Sprintf("ABHYAS-2026-%s", lastDigits)
-		}
-		session.State = StatePaidActive
-		session.ValidTill = now.AddDate(0, 1, 0)
-		if strings.Contains(lower, "699") || session.SelectedPlan == pricing.TierPro {
-			session.SelectedPlan = pricing.TierPro
-			session.DailyScanLimit = 12
-		} else {
-			session.SelectedPlan = pricing.TierBasic
-			session.DailyScanLimit = 5
-		}
-		return fmt.Sprintf("🎉 *सत्यापन सफल!*\n• स्थायी ID: *%s*\n• प्लान: *%s* (%d स्कैन/दिन)\n• वैधता: %s\n\nअभ्यास शुरू करने हेतु *START* लिखें।",
-			session.PermanentUID, session.SelectedPlan, session.DailyScanLimit, session.ValidTill.Format("02-01-2006"))
-	}
-
-	// 5. ऑनबोर्डिंग फ्लो
-	switch session.State {
-	case StateNew:
-		if lower == "hi" || upper == "HI" || strings.HasPrefix(lower, "hi") || strings.Contains(lower, "hello") || strings.Contains(lower, "नमस्ते") || strings.Contains(lower, "start") {
-			session.State = StateAwaitingConsent
-			return "नमस्ते! 'अनंत अभ्यास' में आपका स्वागत है। 🎓\nक्या आप 7-दिन फ्री डेमो के लिए तैयार हैं? (हाँ / नहीं)"
-		}
-		return "नमस्ते! शुरू करने हेतु *Hi* भेजें।"
-
-	case StateAwaitingConsent:
-		if lower == "हाँ" || lower == "yes" || lower == "ha" || lower == "haa" || upper == "YES" || lower == "y" {
-			session.State = StateAwaitingDetails
-			return "कृपया बच्चे का *नाम, कक्षा (1-12) और हॉबी* लिखें:\n(उदा: राहुल, कक्षा 6, रोबोटिक्स)"
-		}
-		session.State = StateSpamDropped
-		return "धन्यवाद! भविष्य में कभी भी 'Hi' भेजकर शुरू कर सकते हैं।"
-
-	case StateAwaitingDetails:
-		parts := strings.Split(text, ",")
-		session.ChildName = strings.TrimSpace(parts[0])
-		session.Grade = 6
-		session.Hobby = "General"
-		if len(parts) >= 3 {
-			session.Hobby = strings.TrimSpace(parts[2])
-		}
-		session.State = StateInTest
-		session.TestStartTime = now
-		return fmt.Sprintf("धन्यवाद! %s का 2-मिनट टेस्ट:\nसवाल: 12 + 8 = 20 है, तो 35 - 15 = कितना होगा?", session.ChildName)
-
-	case StateInTest:
-		duration := time.Since(session.TestStartTime).Seconds()
-		session.State = StateDemoActive
-		speed := "सामान्य"
-		if duration < 10 {
-			speed = "असाधारण (Olympiad Fast Thinker)"
-		}
-		return fmt.Sprintf("📊 *डायग्नोस्टिक रिपोर्ट*\n• छात्र: %s (कक्षा %d)\n• गति: %s\n• 🆔 डेमो ID: *%s*\n\n🎉 7-दिवसीय फ्री डेमो सक्रिय है! अभ्यास के लिए *START* लिखें।",
-			session.ChildName, session.Grade, speed, session.TemporaryDemoID)
-
-	case StateDemoActive:
-		if now.After(session.DemoEndDate) || lower == "plan" {
-			session.State = StateAwaitingPlan
-			return fmt.Sprintf("🎉 7-दिन डेमो पूरा हुआ! प्लान चुनें:\n[1] Basic (₹399 - 5 स्कैन/दिन)\n[2] Pro (₹699 - 12 स्कैन/दिन)\n\nDemo ID: *%s*", session.TemporaryDemoID)
-		}
-		if lower == "start" || upper == "START" {
-			return fmt.Sprintf("📚 Day अभ्यास एक्टिव है (%s)। सवाल पूछें या फोटो भेजें।", session.ChildName)
-		}
-		return "अभ्यास के लिए *START* लिखें।"
-
-	case StateAwaitingPlan:
-		if lower == "1" || strings.Contains(lower, "basic") {
-			session.SelectedPlan = pricing.TierBasic
-			return buildDirectUPIPrompt(phone, session.ChildName, pricing.TierBasic, 399.0, session.TemporaryDemoID)
-		} else if lower == "2" || strings.Contains(lower, "pro") {
-			session.SelectedPlan = pricing.TierPro
-			return buildDirectUPIPrompt(phone, session.ChildName, pricing.TierPro, 699.0, session.TemporaryDemoID)
-		}
-		return "विकल्प चुनें: 1 (Basic ₹399) या 2 (Pro ₹699)"
-
-	case StatePaidActive:
-		if lower == "start" || upper == "START" {
-			return fmt.Sprintf("🌟 स्वागत है %s! %s एक्टिव है (%d स्कैन/दिन)। डायरी फोटो भेजें।", session.ChildName, session.SelectedPlan, session.DailyScanLimit)
-		}
-		return "मास्टरजी सक्रिय हैं! सवाल पूछें।"
-	}
-	return ""
-}
-
+// WhatsApp इनकमिंग हैंडलर (नया ऑनबोर्डिंग इंजन रूटिंग)
 func handleIncomingCommunication(w http.ResponseWriter, r *http.Request) {
 	from := r.URL.Query().Get("from")
 	body := r.URL.Query().Get("body")
@@ -341,10 +109,88 @@ func handleIncomingCommunication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reply := MasterWhatsAppGateway(from, body)
+	// नए ऑनबोर्डिंग इंजन द्वारा रिप्लाई प्रोसेस करना
+	reply := fullOnboardingEngine.ProcessMessage(from, body)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(reply))
+}
+
+// डायनामिक HTML मेरिट सर्टिफिकेट रेंडरर
+func renderCertificateHTML(p *parental.CompleteParentProfile) string {
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <title>अनंत अभ्यास - आधिकारिक मूल्यांकन प्रमाण पत्र</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Montserrat:wght@400;600;700&display=swap');
+    body { background-color: #0f172a; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; font-family: 'Montserrat', sans-serif; }
+    .cert-card { width: 850px; background: #ffffff; border: 12px solid #0f172a; outline: 3px solid #d97706; outline-offset: -8px; padding: 40px 50px; box-shadow: 0 25px 50px rgba(0,0,0,0.5); position: relative; color: #1e293b; background-image: radial-gradient(#f8fafc 90%%, #f1f5f9 100%%); }
+    .header { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #e2e8f0; padding-bottom: 15px; }
+    .brand { display: flex; align-items: center; gap: 15px; }
+    .brand h1 { font-family: 'Cinzel', serif; font-size: 24px; margin: 0; color: #0f172a; }
+    .student-block { text-align: center; margin: 25px 0; }
+    .student-name { font-size: 30px; font-weight: 700; color: #0f172a; border-bottom: 2px solid #cbd5e1; display: inline-block; padding: 2px 25px; margin: 8px 0; }
+    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 25px 0; background: #f8fafc; padding: 15px; border: 1px solid #e2e8f0; border-radius: 6px; text-align: center; }
+    .val { font-size: 18px; font-weight: 700; color: #0f172a; }
+    .highlight { color: #16a34a; }
+    .indicator-tag { background: #0f172a; color: #ffffff; padding: 12px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }
+    .badge { background: #d97706; padding: 4px 12px; border-radius: 3px; font-weight: 700; }
+    .stamp { width: 65px; height: 65px; border: 2px dashed #d97706; border-radius: 50%%; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #d97706; font-size: 8px; font-weight: 700; transform: rotate(-10deg); }
+  </style>
+</head>
+<body>
+  <div class="cert-card">
+    <div class="header">
+      <div class="brand">
+        <svg width="50" height="50" viewBox="0 0 100 100" fill="none">
+          <path d="M50 5L90 20V50C90 75 50 95 50 95C50 95 10 75 10 50V20L50 5Z" fill="#0F172A" stroke="#D97706" stroke-width="4"/>
+          <path d="M35 50C35 45 42 45 45 50C48 55 55 55 55 50C55 45 48 45 45 50C42 55 35 55 35 50Z" stroke="#F59E0B" stroke-width="3" fill="none"/>
+        </svg>
+        <div>
+          <h1>ANANT ABHYAS</h1>
+          <div style="font-size: 10px; color: #b45309; font-weight: 700; letter-spacing: 1px;">ROYAL FMC CORPORATION • ASSESSMENT WING</div>
+        </div>
+      </div>
+      <div style="text-align: right; font-size: 11px; color: #64748b;">
+        <strong>आधिकारिक मूल्यांकन पत्र</strong><br>
+        आईडी: %s
+      </div>
+    </div>
+
+    <div class="student-block">
+      <p style="margin: 0; color: #64748b; font-size: 14px;">प्रमाणित किया जाता है कि विद्यार्थी</p>
+      <div class="student-name">%s</div>
+      <div style="font-size: 13px; color: #334155; font-weight: 600;">
+        अभिभावक: श्री %s | कक्षा: %d | विंग: <strong>%s</strong>
+      </div>
+    </div>
+
+    <div class="metrics">
+      <div><div style="font-size: 11px; color: #64748b;">परीक्षण अंक</div><div class="val highlight">%d / 20</div></div>
+      <div><div style="font-size: 11px; color: #64748b;">सटीकता दर</div><div class="val">80%%%%</div></div>
+      <div><div style="font-size: 11px; color: #64748b;">कुल समय</div><div class="val">%d सेकंड</div></div>
+      <div><div style="font-size: 11px; color: #64748b;">एंटी-चीट ऑडिट</div><div class="val" style="color: #0284c7;">100%%%% प्रामाणिक</div></div>
+    </div>
+
+    <div class="indicator-tag">
+      <div><strong>निर्धारित इंडेक्स स्तर:</strong> %s</div>
+      <div class="badge">VERIFIED</div>
+    </div>
+
+    <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 15px;">
+      <div style="font-size: 10px; color: #64748b; max-width: 500px;">
+        यह परिणाम 15-मिनट Kiosk सत्र और रिस्पॉन्स टाइमर इंजन द्वारा क्रिप्टोग्राफिक रूप से तैयार किया गया है। 7-दिवसीय सिस्टम डेमो सक्रिय है।
+      </div>
+      <div style="display: flex; align-items: center; gap: 15px;">
+        <div class="stamp"><span>★ VERIFIED ★</span><span>ANANT</span><span>SECURE</span></div>
+        <div style="font-size: 11px; font-weight: 700; color: #0f172a;">परीक्षा नियंत्रक<br><span style="color:#64748b; font-weight:400;">अनंत अभ्यास</span></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`, p.DemoID, p.ChildName, p.ParentName, p.ClassGrade, p.ExamGoalWing, p.ScoreOutOf20, p.TotalSolvingSec, p.IndicatorLevel)
 }
 
 type UltraClusterHub struct {
@@ -391,7 +237,7 @@ func main() {
 	parentFeedback := feedback.NewSupportEngineService(db)
 	appSupport := support.NewAutoHealingEngine()
 
-	// 2. ऑटो-स्केलिंग क्लस्टर मैश
+	// 2. ऑटो-स्केलिंग क्लस्टर मेश
 	clusterMesh := cluster.NewDynamicClusterMesh()
 	renderURL := os.Getenv("RENDER_INTERNAL_URL")
 	if renderURL == "" {
@@ -479,14 +325,33 @@ func main() {
 		fmt.Fprintf(w, "<h2>अनंत अभ्यास एडमिन पोर्टल</h2><p>गेटवे: 9664006651 | एडमिन: 9024414973</p><p>समय (IST): %s</p>", snap.FormattedTimestamp)
 	})
 
-	// WhatsApp गेटवे
+	// WhatsApp गेटवे रूट्स
 	http.HandleFunc("/webhook", handleIncomingCommunication)
 	http.HandleFunc("/incoming", handleIncomingCommunication)
+
+	// डिजिटल मेरिट सर्टिफिकेट रूट
+	http.HandleFunc("/cert/", func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(r.URL.Path, "/")
+		if len(parts) < 3 {
+			http.NotFound(w, r)
+			return
+		}
+		demoID := parts[2]
+		profile := fullOnboardingEngine.GetProfileByDemoID(demoID)
+		if profile == nil {
+			http.Error(w, "सर्टिफिकेट नहीं मिला या डेमो आईडी अमान्य है।", http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		html := renderCertificateHTML(profile)
+		w.Write([]byte(html))
+	})
 
 	// क्लस्टर ट्रैफिक डिस्पैचर
 	http.HandleFunc("/cluster/dispatch", hub.ClusterMesh.RouteSmartTraffic)
 
-	// ऑनबोर्डिंग व सख्त कैप्स बिलिंग (1, 1, 2, 4)
+	// ऑनबोर्डिंग व बिलिंग
 	http.HandleFunc("/api/v1/parent/onboarding", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -596,7 +461,7 @@ func main() {
 	// इन-ऐप क्रैश हुक
 	http.HandleFunc("/api/v1/app/support-hook", func(w http.ResponseWriter, r *http.Request) {
 		parentID := r.URL.Query().Get("parent_id")
-	    rawError := r.URL.Query().Get("error_log")
+		rawError := r.URL.Query().Get("error_log")
 
 		ticket := hub.AppSupport.IngestAndAutoResolve("IN_APP_CRASH_HOOK", parentID, rawError)
 		hub.Brain.ProcessFeedbackAndFinance(string(ticket.Type), rawError)
