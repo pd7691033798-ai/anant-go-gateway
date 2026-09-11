@@ -75,8 +75,8 @@ func (p *PlanService) GetPlanLimits(tier PlanTier) PlanLimits {
 			MaxChildren:      1,
 			AIAccess:         true,
 			MultiProfile:     false,
-			ExamMode:         true,  // परीक्षा मोड शामिल
-			SeasonalBreak:    true,  // समर/विंटर और छुट्टियां शामिल
+			ExamMode:         true, // परीक्षा मोड शामिल
+			SeasonalBreak:    true, // समर/विंटर और छुट्टियां शामिल
 			LanguageSupport:  true,
 			TrialDays:        0,
 		}
@@ -86,11 +86,11 @@ func (p *PlanService) GetPlanLimits(tier PlanTier) PlanLimits {
 			AllowedTracks:    10,
 			DailyQAQuestions: 15, // तीनों के लिए कुल 15 सवाल
 			MonthlyPrice:     1099,
-			MaxChildren:      3,  
+			MaxChildren:      3,
 			AIAccess:         true,
-			MultiProfile:     true,  // मल्टी-चाइल्ड टाइम-शेयरिंग विंडो
-			ExamMode:         true,  // परीक्षा मोड शामिल
-			SeasonalBreak:    true,  // समर/विंटर और छुट्टियां शामिल
+			MultiProfile:     true, // मल्टी-चाइल्ड टाइम-शेयरिंग विंडो
+			ExamMode:         true, // परीक्षा मोड शामिल
+			SeasonalBreak:    true, // समर/विंटर और छुट्टियां शामिल
 			LanguageSupport:  true,
 			TrialDays:        0,
 		}
@@ -100,11 +100,11 @@ func (p *PlanService) GetPlanLimits(tier PlanTier) PlanLimits {
 			AllowedTracks:    10,
 			DailyQAQuestions: 20, // कुल 20 सवाल
 			MonthlyPrice:     1499,
-			MaxChildren:      4,  
+			MaxChildren:      4,
 			AIAccess:         true,
-			MultiProfile:     true,  // मल्टी-चाइल्ड टाइम-शेयरिंग विंडो
-			ExamMode:         true,  // परीक्षा मोड शामिल
-			SeasonalBreak:    true,  // समर/विंटर और छुट्टियां शामिल
+			MultiProfile:     true, // मल्टी-चाइल्ड टाइम-शेयरिंग विंडो
+			ExamMode:         true, // परीक्षा मोड शामिल
+			SeasonalBreak:    true, // समर/विंटर और छुट्टियां शामिल
 			LanguageSupport:  true,
 			TrialDays:        0,
 		}
@@ -112,4 +112,21 @@ func (p *PlanService) GetPlanLimits(tier PlanTier) PlanLimits {
 		// डिफ़ॉल्ट रूप से बेसिक प्लान लागू होगा
 		return p.GetPlanLimits(TierBasic)
 	}
+}
+
+// GetUserPlanLimits: यूजर के फ़ोन नंबर के आधार पर उसके प्लान की लिमिट्स लौटाता है
+func (p *PlanService) GetUserPlanLimits(whatsappNumber string) (PlanLimits, error) {
+	if p.db == nil {
+		return p.GetPlanLimits(TierBasic), nil
+	}
+
+	var tierStr string
+	query := `SELECT plan_tier FROM subscriptions WHERE whatsapp_number = $1 AND status = 'ACTIVE' ORDER BY id DESC LIMIT 1`
+	err := p.db.QueryRow(query, whatsappNumber).Scan(&tierStr)
+	if err != nil {
+		// यदि कोई एक्टिव प्लान न मिले, तो डिफ़ॉल्ट बेसिक प्लान दें
+		return p.GetPlanLimits(TierBasic), nil
+	}
+
+	return p.GetPlanLimits(PlanTier(tierStr)), nil
 }
