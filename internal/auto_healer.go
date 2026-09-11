@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"log"
 	"net/http"
 	"runtime"
