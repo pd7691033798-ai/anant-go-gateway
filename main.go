@@ -305,7 +305,7 @@ func main() {
 		_ = security.NewAntiSharingGuard(db)
 		_ = security.NewGeoTravelService(db)
 		_ = monitor.NewMindReader()
-		_ = monitor.NewInactivityNudgeService()
+		_ = monitor.NewInactivityNudgeService(db)
 		_ = stealth.NewStealthComposer()
 		_ = family.NewMultiChildEngine(db)
 		_ = featurephone.NewFeaturePhoneEngine(db)
