@@ -11,6 +11,7 @@ const (
 	TierBasic  PlanTier = "BASIC"
 	TierPro    PlanTier = "PRO"
 	TierFamily PlanTier = "FAMILY"
+	Tier UNLIMITED FAMILY PlanTier = "UNLIMITED FAMILY"
 )
 
 type PlanLimits struct {
@@ -55,7 +56,7 @@ func (p *PlanService) GetPlanLimits(tier PlanTier) PlanLimits {
 		return PlanLimits{
 			MaxDailyScans:    5,
 			AllowedTracks:    1,
-			DailyQAQuestions: 2, // बेसिक के लिए केवल 2 सवाल
+			DailyQAQuestions: 3, // बेसिक के लिए केवल 3 सवाल
 			MonthlyPrice:     399,
 			MaxChildren:      1,
 			AIAccess:         false,
@@ -81,11 +82,25 @@ func (p *PlanService) GetPlanLimits(tier PlanTier) PlanLimits {
 		}
 	case TierFamily:
 		return PlanLimits{
+			MaxDailyScans:    15, // तीनों बच्चों के लिए साझा 15 स्कैन
+			AllowedTracks:    10,
+			DailyQAQuestions: 15, // तीनों के लिए कुल 15 सवाल
+			MonthlyPrice:     1099,
+			MaxChildren:      3,  
+			AIAccess:         true,
+			MultiProfile:     true,  // मल्टी-चाइल्ड टाइम-शेयरिंग विंडो
+			ExamMode:         true,  // परीक्षा मोड शामिल
+			SeasonalBreak:    true,  // समर/विंटर और छुट्टियां शामिल
+			LanguageSupport:  true,
+			TrialDays:        0,
+		}
+		case Tier UNLIMITED Family:
+		return PlanLimits{
 			MaxDailyScans:    20, // तीनों बच्चों के लिए साझा 20 स्कैन
 			AllowedTracks:    10,
 			DailyQAQuestions: 20, // तीनों के लिए कुल 20 सवाल
-			MonthlyPrice:     899,
-			MaxChildren:      3,  // 2 से 3 बच्चे
+			MonthlyPrice:     1499,
+			MaxChildren:      4,  
 			AIAccess:         true,
 			MultiProfile:     true,  // मल्टी-चाइल्ड टाइम-शेयरिंग विंडो
 			ExamMode:         true,  // परीक्षा मोड शामिल
