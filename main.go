@@ -311,7 +311,6 @@ func main() {
 		_ = featurephone.NewFeaturePhoneEngine(db)
 		_ = security.NewImageEnhancer()
 		_ = monitor.NewWeeklyReportService(db)
-		_ = gateway_service.NewGatewayRouter(db)
 		_ = internal.NewAdminDashboard(db)
 		_ = internal.NewAutoHealerEngine(AdminNumber, 400.0)
 
