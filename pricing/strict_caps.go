@@ -8,7 +8,7 @@ func GetStrictChildLimit(planTier string) int {
 		return 1 // बेसिक: 1, प्रो: 1
 	case "FAMILY_1099":
 		return 2 // फैमिली: सख्त 2 बच्चे
-	case "UNLIMITED_1499":
+	case "UNLIMITED FAMILY_1499":
 		return 4 // अनलिमिटेड फैमिली: सख्त 4 बच्चे
 	default:
 		return 1
