@@ -15,7 +15,6 @@ import (
 
 	// कोर प्रोजेक्ट पैकेजेस
 	"anant-abhyas/audio"
-	"anant-abhyas/cmd/api"
 	"anant-abhyas/database"
 	"anant-abhyas/family"
 	"anant-abhyas/featurephone"
@@ -295,7 +294,6 @@ func main() {
 		_ = featurephone.NewFeaturePhoneEngine(db)
 		_ = security.NewImageEnhancer()
 		_ = monitor.NewWeeklyReportService(db)
-		_ = api.NewAPIServer(db)
 		_ = gateway_service.NewGatewayRouter(db)
 		_ = internal.NewAdminDashboard(db)
 		_ = internal.NewAutoHealerEngine(AdminNumber, 400.0)
