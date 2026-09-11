@@ -19,7 +19,6 @@ import (
 	"anant-abhyas/family"
 	"anant-abhyas/featurephone"
 	"anant-abhyas/feedback"
-	"anant-abhyas/gateway_service"
 	"anant-abhyas/holiday"
 	"anant-abhyas/internal"
 	"anant-abhyas/language"
