@@ -367,7 +367,7 @@ func main() {
 	// क्लस्टर ट्रैफिक डिस्पैचर
 	http.HandleFunc("/cluster/dispatch", hub.ClusterMesh.RouteSmartTraffic)
 
-	// ऑनबोर्डिंग व बिलिंग
+		// ऑनबोर्डिंग व बिलिंग
 	http.HandleFunc("/api/v1/parent/onboarding", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -379,7 +379,8 @@ func main() {
 	http.HandleFunc("/api/v1/billing/calculate", func(w http.ResponseWriter, r *http.Request) {
 		tier := r.URL.Query().Get("tier")
 		hasExam := r.URL.Query().Get("exam_addon") == "true"
-		bill, err := newpricing.ComputeModularBill(tier, hasExam)
+		
+		bill, err := newpricing.ComputeModularBill(tier, hasExam, 0, false)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -394,17 +395,17 @@ func main() {
 		tier := r.URL.Query().Get("tier")
 		hasExam := r.URL.Query().Get("exam_addon") == "true"
 
-		bill, err := newpricing.ComputeModularBill(tier, hasExam)
+		bill, err := newpricing.ComputeModularBill(tier, hasExam, 0, false)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		sub := hub.AutoPayEngine.SetupMandate(parentID, bill.TotalPrice)
+		sub := hub.AutoPayEngine.SetupMandate(parentID, float64(bill.FinalPayable))
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":          "MANDATE_INITIATED",
-			"monthly_amount":  bill.TotalPrice,
+			"monthly_amount":  bill.FinalPayable,
 			"allowed_kids":    bill.AllowedKids,
 			"subscription_id": sub.SubscriptionID,
 			"message":         "UPI ऑटो-पे मैंडेट अधिकृत करें (नो-डिफ़ॉल्ट पॉलिसी)",
@@ -425,6 +426,7 @@ func main() {
 		hub.Brain.ProcessFeedbackAndFinance("PAYMENT_SETTLED", bankUTR)
 		w.Write([]byte(`{"status":"SETTLEMENT_CONFIRMED_AND_UNLOCKED"}`))
 	})
+	
 
 	// इन-ऐप गवर्नमेंट CBT विंडो
 	http.HandleFunc("/api/v1/cbt/submit", func(w http.ResponseWriter, r *http.Request) {
