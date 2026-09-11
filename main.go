@@ -294,7 +294,7 @@ func main() {
 		_ = vacation.NewWinterBootcampService(db)
 		_ = vacation.NewFoundationBridgeService()
 		_ = holiday.NewExamSchedulerService(db)
-		_ = vacation.NewCustomInterestService(db)
+	// _ = vacation.NewCustomInterestService(db)
 		_ = vacation.NewChildWellnessService(db)
 		_ = language.NewPanIndiaDialectService()
 		_ = language.NewFusionDialectService(db)
@@ -311,7 +311,7 @@ func main() {
 		_ = featurephone.NewFeaturePhoneEngine(db)
 		_ = security.NewImageEnhancer()
 		_ = monitor.NewWeeklyReportService(db)
-		_ = internal.NewAdminDashboard(db)
+	// _ = internal.NewAdminDashboard(db)
 		_ = internal.NewAutoHealerEngine(AdminNumber, 400.0)
 
 		log.Println("✅ सभी 20 कोर बैकग्राउंड इंजन पूरी तरह सक्रिय हैं।")
