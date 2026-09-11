@@ -481,7 +481,16 @@ func main() {
 			"active_tracks": []string{"NAVODAYA", "SAINIK_SCHOOL", "NDA", "IIT_JEE"},
 		})
 	})
+// ⚡ ऑटोनोमस सैंडबॉक्स ट्रायल कोर
+	sandboxCore := sandbox.NewAutonomousSandboxCore(AdminNumber, db, func(from, body string) string {
+		return fullOnboardingEngine.ProcessMessage(from, body)
+	})
 
+	http.HandleFunc("/sandbox", sandboxCore.RenderSandboxUI)
+	http.HandleFunc("/api/v1/sandbox/simulate", sandboxCore.HandleSimulation)
+	http.HandleFunc("/api/v1/sandbox/toggle", sandboxCore.ToggleSimulationStates)
+	http.HandleFunc("/api/v1/sandbox/audit", sandboxCore.ServeAuditReport)
+	
 	// 5. सर्वर स्टार्टअप
 	port := os.Getenv("PORT")
 	if port == "" {
