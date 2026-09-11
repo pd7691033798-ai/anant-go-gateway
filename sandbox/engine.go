@@ -93,7 +93,7 @@ func (s *AutonomousSandboxCore) DeepScanAndCleanCodebase(rootDir string) {
 
 		if strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go") {
 			total++
-			node, parseErr := parser.ParseFile(fset, path, nil, parser.ExportedDeclarationOnly)
+			node, parseErr := parser.ParseFile(fset, path, nil, 0)
 			if parseErr != nil {
 				return nil
 			}
