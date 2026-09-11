@@ -7,11 +7,11 @@ import (
 type PlanTier string
 
 const (
-	TierDemo   PlanTier = "DEMO"
-	TierBasic  PlanTier = "BASIC"
-	TierPro    PlanTier = "PRO"
-	TierFamily PlanTier = "FAMILY"
-	Tier UNLIMITED FAMILY PlanTier = "UNLIMITED FAMILY"
+	TierDemo            PlanTier = "DEMO"
+	TierBasic           PlanTier = "BASIC"
+	TierPro             PlanTier = "PRO"
+	TierFamily          PlanTier = "FAMILY"
+	TierUnlimitedFamily PlanTier = "UNLIMITED FAMILY"
 )
 
 type PlanLimits struct {
@@ -94,11 +94,11 @@ func (p *PlanService) GetPlanLimits(tier PlanTier) PlanLimits {
 			LanguageSupport:  true,
 			TrialDays:        0,
 		}
-		case Tier UNLIMITED Family:
+	case TierUnlimitedFamily:
 		return PlanLimits{
-			MaxDailyScans:    20, // तीनों बच्चों के लिए साझा 20 स्कैन
+			MaxDailyScans:    20, // बच्चों के लिए साझा 20 स्कैन
 			AllowedTracks:    10,
-			DailyQAQuestions: 20, // तीनों के लिए कुल 20 सवाल
+			DailyQAQuestions: 20, // कुल 20 सवाल
 			MonthlyPrice:     1499,
 			MaxChildren:      4,  
 			AIAccess:         true,
