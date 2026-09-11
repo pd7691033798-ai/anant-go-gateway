@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"your_project_name/language" // अपने प्रोजेक्ट के गो मॉड्यूल नाम के अनुसार रखें
+	"anant-abhyas/language" // अपने प्रोजेक्ट के गो मॉड्यूल नाम के अनुसार रखें
 )
 
 type StudentContext struct {
