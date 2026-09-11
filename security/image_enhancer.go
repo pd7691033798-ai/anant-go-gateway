@@ -44,7 +44,7 @@ func (ie *ImageEnhancer) ValidateCameraMetadata(mimeType string, fileSizeBytes i
 	}
 
 	if fileSizeBytes < ie.minSizeBytes {
-		return fmt.Sprintf("चित्र बहुत छोटा (%d KB) या धुंधला है। कृपया कॉपी के पास से साफ़ और स्पष्ट फोटो लें।", fileSizeBytes/1024)
+		return fmt.Errorf("चित्र बहुत छोटा (%d KB) या धुंधला है। कृपया कॉपी के पास से साफ़ और स्पष्ट फोटो लें।", fileSizeBytes/1024)
 	}
 
 	mime := strings.ToLower(strings.TrimSpace(mimeType))
