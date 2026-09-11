@@ -22,3 +22,15 @@ func InitDB(connStr string) *sql.DB {
 
 	return db
 }
+
+// ConnectPostgres: main.go के साथ कम्पैटिबिलिटी के लिए
+func ConnectPostgres(connStr string) (*sql.DB, error) {
+	db, err := sql.Open("postgres", connStr)
+	if err != nil {
+		return nil, err
+	}
+	if err = db.Ping(); err != nil {
+		return db, fmt.Errorf("डेटाबेस पिंग विफल: %w", err)
+	}
+	return db, nil
+}
