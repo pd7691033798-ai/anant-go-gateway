@@ -207,7 +207,7 @@ func sendWhatsAppContact(toPhone string) error {
 		"VERSION:3.0\n" +
 		"FN:अनंत अभ्यास (Anant Abhyas)\n" +
 		"ORG:Anant Abhyas Education;\n" +
-		"TEL;TYPE=WORK,VOICE:+919664006651\n" +
+		"TEL;TYPE=WORK,VOICE:9664006651\n" +
 		"NOTE:दैनिक 15-मिनट हस्तलिखित अभ्यास सेवा (सतत प्रगति • ज्ञानोदय)\n" +
 		"END:VCARD"
 
@@ -223,7 +223,7 @@ func sendWhatsAppContact(toPhone string) error {
 				},
 				"phones": []map[string]string{
 					{
-						"phone": "+919664006651",
+						"phone": "9664006651",
 						"type":  "WORK",
 					},
 				},
