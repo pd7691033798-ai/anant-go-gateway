@@ -496,8 +496,11 @@ func main() {
 			"active_tracks": []string{"NAVODAYA", "SAINIK_SCHOOL", "NDA", "IIT_JEE"},
 		})
 	})
-// ⚡ ऑटोनोमस सैंडबॉक्स ट्रायल कोर
+          	// ⚡ ऑटोनोमस सैंडबॉक्स ट्रायल कोर (वेलनेस व ऑनबोर्डिंग संयुक्त)
 	sandboxCore := sandbox.NewAutonomousSandboxCore(AdminNumber, db, func(from, body string) string {
+		if wellnessEngine.DetectSicknessFromMessage(body) {
+			return wellnessEngine.MarkStudentSick(from, "सैंडबॉक्स छात्र", "दैनिक अभ्यास")
+		}
 		return fullOnboardingEngine.ProcessMessage(from, body)
 	})
 
@@ -505,7 +508,7 @@ func main() {
 	http.HandleFunc("/api/v1/sandbox/simulate", sandboxCore.HandleSimulation)
 	http.HandleFunc("/api/v1/sandbox/toggle", sandboxCore.ToggleSimulationStates)
 	http.HandleFunc("/api/v1/sandbox/audit", sandboxCore.ServeAuditReport)
-	
+
 	// 5. सर्वर स्टार्टअप
 	port := os.Getenv("PORT")
 	if port == "" {
