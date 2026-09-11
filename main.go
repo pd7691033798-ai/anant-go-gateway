@@ -56,6 +56,7 @@ var (
 	clockEngine            = temporal.NewClockEngine()
 	contactFilter          *featurephone.ContactFilter
 	fullOnboardingEngine   *parental.FullWhatsAppEngine
+	wellnessEngine         = vacation.NewChildWellnessService(nil) 
 )
 
 func init() {
