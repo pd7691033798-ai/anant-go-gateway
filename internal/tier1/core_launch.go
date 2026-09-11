@@ -1,11 +1,40 @@
 package tier1
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"regexp"
+	"time"
+)
+
+// CoreLaunchSuite कोर लॉन्च इंजन
+type CoreLaunchSuite struct {
+	db *sql.DB
+}
+
+// NewCoreLaunchSuite कंस्ट्रक्टर
+func NewCoreLaunchSuite(db *sql.DB) *CoreLaunchSuite {
+	return &CoreLaunchSuite{db: db}
+}
+
+// sanitizePhone फोन नंबर से केवल 10 अंक निकालता है
+func sanitizePhone(phone string) string {
+	re := regexp.MustCompile(`[^0-9]`)
+	cleaned := re.ReplaceAllString(phone, "")
+	if len(cleaned) > 10 {
+		return cleaned[len(cleaned)-10:]
+	}
+	return cleaned
+}
+
 type AccessStatus string
 
 const (
-	StatusActivePaid   AccessStatus = "ACTIVE_PAID"   // पेड सब्सक्रिप्शन एक्टिव
-	StatusActiveDemo   AccessStatus = "ACTIVE_DEMO"   // दिन 1-7 (फ्री डेमो)
-	StatusGracePeriod  AccessStatus = "GRACE_PERIOD"  // दिन 8-10 (3 दिन का ग्रेस पीरियड)
-	StatusExpired      AccessStatus = "EXPIRED"       // 10 दिन पूरे - सेवा बंद
+	StatusActivePaid  AccessStatus = "ACTIVE_PAID"  // पेड सब्सक्रिप्शन एक्टिव
+	StatusActiveDemo  AccessStatus = "ACTIVE_DEMO"  // दिन 1-7 (फ्री डेमो)
+	StatusGracePeriod AccessStatus = "GRACE_PERIOD" // दिन 8-10 (3 दिन का ग्रेस पीरियड)
+	StatusExpired     AccessStatus = "EXPIRED"      // 10 दिन पूरे - सेवा बंद
 )
 
 // CheckAccessStatus 7 दिन डेमो + 3 दिन ग्रेस पीरियड की जांच करता है
