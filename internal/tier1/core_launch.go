@@ -1,3 +1,4 @@
+package tier1
 type AccessStatus string
 
 const (
