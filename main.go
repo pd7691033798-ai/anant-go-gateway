@@ -110,6 +110,23 @@ func handleIncomingCommunication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 1. माता-पिता द्वारा बीमारी या बुखार का संदेश भेजना
+	if wellnessEngine.DetectSicknessFromMessage(body) {
+		reply := wellnessEngine.MarkStudentSick(from, "विद्यार्थी", "दैनिक अभ्यास")
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(reply))
+		return
+	}
+
+	// 2. स्वस्थ होने पर सामान्य अभ्यास में वापसी
+	if strings.Contains(strings.ToLower(body), "ठीक है") || strings.Contains(strings.ToLower(body), "स्वस्थ") {
+		reply := wellnessEngine.MarkStudentRecovered(from, "विद्यार्थी")
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(reply))
+		return
+	}
 	// नए ऑनबोर्डिंग इंजन द्वारा रिप्लाई प्रोसेस करना
 	reply := fullOnboardingEngine.ProcessMessage(from, body)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -278,7 +295,7 @@ func main() {
 		_ = vacation.NewFoundationBridgeService()
 		_ = holiday.NewExamSchedulerService(db)
 		_ = vacation.NewCustomInterestService(db)
-		_ = vacation.NewPacingService()
+		_ = vacation.NewChildWellnessService(db)
 		_ = language.NewPanIndiaDialectService()
 		_ = language.NewFusionDialectService(db)
 		_ = audio.NewVoiceTunerService()
