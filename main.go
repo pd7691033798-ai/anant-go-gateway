@@ -24,12 +24,11 @@ import (
 	"anant-abhyas/language"
 	"anant-abhyas/monitor"
 	"anant-abhyas/pricing"
+	"anant-abhyas/sandbox"
 	"anant-abhyas/security"
 	"anant-abhyas/stealth"
 	"anant-abhyas/temporal"
 	"anant-abhyas/vacation"
-	"anant-abhyas/sandbox"
-
 
 	// नए क्लस्टर, CBT, पेरेंटल इंजन व बिलिंग पैकेजेस
 	"anant-abhyas/cluster"
@@ -53,10 +52,10 @@ const (
 )
 
 var (
-	clockEngine            = temporal.NewClockEngine()
-	contactFilter          *featurephone.ContactFilter
-	fullOnboardingEngine   *parental.FullWhatsAppEngine
-	wellnessEngine         = vacation.NewChildWellnessService(nil) 
+	clockEngine          = temporal.NewClockEngine()
+	contactFilter        *featurephone.ContactFilter
+	fullOnboardingEngine *parental.FullWhatsAppEngine
+	wellnessEngine       = vacation.NewChildWellnessService(nil)
 )
 
 func init() {
@@ -244,6 +243,9 @@ func main() {
 		}
 	}
 
+	// 🔐 ज़ीरो-ट्रस्ट मास्टर पिन और सुरक्षा मैनेजर (केवल 1 बार इनिशियलाइज़ेशन)
+	pinMgr := security.NewPINManager(db)
+
 	// 1. सेल्फ-लर्निंग ब्रेन और स्केल बफर
 	brain := learning.NewAdaptiveSystemBrain()
 	brain.RunSelfLearningCycle()
@@ -290,11 +292,10 @@ func main() {
 		_ = pricing.NewPlanService(db)
 		_ = pricing.NewLoyaltyService(db)
 		_ = vacation.NewAprilSessionService(db)
-	// _ = vacation.NewHomeworkService(db)
 		_ = vacation.NewWinterBootcampService(db)
 		_ = vacation.NewFoundationBridgeService()
 		_ = holiday.NewExamSchedulerService(db)
-	    _ = vacation.NewCustomInterestService(db)
+		_ = vacation.NewCustomInterestService(db)
 		_ = vacation.NewChildWellnessService(db)
 		_ = language.NewPanIndiaDialectService()
 		_ = language.NewFusionDialectService(db)
@@ -311,7 +312,6 @@ func main() {
 		_ = featurephone.NewFeaturePhoneEngine(db)
 		_ = security.NewImageEnhancer()
 		_ = monitor.NewWeeklyReportService(db)
-	// _ = internal.NewAdminDashboard(db)
 		_ = internal.NewAutoHealerEngine(AdminNumber, 400.0)
 
 		log.Println("✅ सभी 20 कोर बैकग्राउंड इंजन पूरी तरह सक्रिय हैं।")
@@ -341,6 +341,80 @@ func main() {
 		fmt.Fprintf(w, "<h2>अनंत अभ्यास एडमिन पोर्टल</h2><p>गेटवे: 9664006651 | एडमिन: 9024414973</p><p>समय (IST): %s</p>", snap.FormattedTimestamp)
 	})
 
+	// 🔐 मास्टर पिन वेरिफिकेशन और थ्रॉटल्ड डेली-लॉक रूट
+	http.HandleFunc("/api/v1/parent/verify-pin", func(w http.ResponseWriter, r *http.Request) {
+		phone := r.URL.Query().Get("phone")
+		pin := r.URL.Query().Get("pin")
+
+		ok, code, err := pinMgr.VerifyPINWithDailyLock(phone, pin)
+		w.Header().Set("Content-Type", "application/json")
+		if !ok {
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":  "FAILED",
+				"code":    code,
+				"message": err.Error(),
+			})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "SUCCESS",
+			"code":    code,
+			"message": "पिन सत्यापन सफल",
+		})
+	})
+
+	// 📲 आपातकालीन WhatsApp OTP जनरेट करना
+	http.HandleFunc("/api/v1/parent/request-pin-otp", func(w http.ResponseWriter, r *http.Request) {
+		phone := r.URL.Query().Get("phone")
+		otp, err := pinMgr.GenerateOTP(phone)
+		w.Header().Set("Content-Type", "application/json")
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"status": "ERROR", "message": err.Error()})
+			return
+		}
+
+		pinMgr.SendWhatsAppAlert(phone, fmt.Sprintf("आपका अनंत अभ्यास सुरक्षा कोड: %s (5 मिनट में एक्सपायर होगा)", otp))
+
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "OTP_SENT",
+			"message": "अभिभावक के WhatsApp पर सत्यापन कोड भेज दिया गया है",
+		})
+	})
+
+	// 🔓 WhatsApp OTP से इमरजेंसी अनलॉक करना
+	http.HandleFunc("/api/v1/parent/emergency-unlock", func(w http.ResponseWriter, r *http.Request) {
+		phone := r.URL.Query().Get("phone")
+		otp := r.URL.Query().Get("otp")
+
+		err := pinMgr.UnlockViaParentEmergencyOTP(phone, otp)
+		w.Header().Set("Content-Type", "application/json")
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"status": "ERROR", "message": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "SUCCESS", "message": "सिस्टम सफलतापूर्वक अनलॉक हो गया"})
+	})
+
+	// ⏳ 15-मिनट वन-टाइम बायपास कोड जारी करना
+	http.HandleFunc("/api/v1/parent/issue-bypass", func(w http.ResponseWriter, r *http.Request) {
+		phone := r.URL.Query().Get("phone")
+		code, err := pinMgr.IssueOneTimeBypass(phone)
+		w.Header().Set("Content-Type", "application/json")
+		if err != nil {
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode(map[string]string{"status": "QUOTA_EXCEEDED", "message": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":      "SUCCESS",
+			"bypass_code": code,
+			"validity":    "15 Minutes",
+		})
+	})
+
 	// WhatsApp गेटवे रूट्स
 	http.HandleFunc("/webhook", handleIncomingCommunication)
 	http.HandleFunc("/incoming", handleIncomingCommunication)
@@ -367,7 +441,7 @@ func main() {
 	// क्लस्टर ट्रैफिक डिस्पैचर
 	http.HandleFunc("/cluster/dispatch", hub.ClusterMesh.RouteSmartTraffic)
 
-		// ऑनबोर्डिंग व बिलिंग
+	// ऑनबोर्डिंग व बिलिंग
 	http.HandleFunc("/api/v1/parent/onboarding", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -379,7 +453,7 @@ func main() {
 	http.HandleFunc("/api/v1/billing/calculate", func(w http.ResponseWriter, r *http.Request) {
 		tier := r.URL.Query().Get("tier")
 		hasExam := r.URL.Query().Get("exam_addon") == "true"
-		
+
 		bill, err := newpricing.ComputeModularBill(tier, hasExam, 0, false)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -426,7 +500,6 @@ func main() {
 		hub.Brain.ProcessFeedbackAndFinance("PAYMENT_SETTLED", bankUTR)
 		w.Write([]byte(`{"status":"SETTLEMENT_CONFIRMED_AND_UNLOCKED"}`))
 	})
-	
 
 	// इन-ऐप गवर्नमेंट CBT विंडो
 	http.HandleFunc("/api/v1/cbt/submit", func(w http.ResponseWriter, r *http.Request) {
@@ -479,43 +552,4 @@ func main() {
 	// इन-ऐप क्रैश हुक
 	http.HandleFunc("/api/v1/app/support-hook", func(w http.ResponseWriter, r *http.Request) {
 		parentID := r.URL.Query().Get("parent_id")
-		rawError := r.URL.Query().Get("error_log")
-
-		ticket := hub.AppSupport.IngestAndAutoResolve("IN_APP_CRASH_HOOK", parentID, rawError)
-		hub.Brain.ProcessFeedbackAndFinance(string(ticket.Type), rawError)
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(ticket)
-	})
-
-	// एडमिन स्टेटस
-	http.HandleFunc("/api/v1/admin/stats", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"system":        "Anant Abhyas Ultra Core",
-			"cluster_state": "ACTIVE",
-			"auto_pay":      "ENFORCED_MANDATE_ONLY",
-			"active_tracks": []string{"NAVODAYA", "SAINIK_SCHOOL", "NDA", "IIT_JEE"},
-		})
-	})
-          	// ⚡ ऑटोनोमस सैंडबॉक्स ट्रायल कोर (वेलनेस व ऑनबोर्डिंग संयुक्त)
-	sandboxCore := sandbox.NewAutonomousSandboxCore(AdminNumber, db, func(from, body string) string {
-		if wellnessEngine.DetectSicknessFromMessage(body) {
-			return wellnessEngine.MarkStudentSick(from, "सैंडबॉक्स छात्र", "दैनिक अभ्यास")
-		}
-		return fullOnboardingEngine.ProcessMessage(from, body)
-	})
-
-	http.HandleFunc("/sandbox", sandboxCore.RenderSandboxUI)
-	http.HandleFunc("/api/v1/sandbox/simulate", sandboxCore.HandleSimulation)
-	http.HandleFunc("/api/v1/sandbox/toggle", sandboxCore.ToggleSimulationStates)
-	http.HandleFunc("/api/v1/sandbox/audit", sandboxCore.ServeAuditReport)
-
-	// 5. सर्वर स्टार्टअप
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-	log.Printf("🚀 अनंत अभ्यास क्लस्टर पोर्ट :%s पर पूर्णतः सक्रिय है...", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
-}
+		rawError := r.
