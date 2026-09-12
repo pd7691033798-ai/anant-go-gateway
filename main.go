@@ -48,7 +48,6 @@ const (
 	BrandDisplayName = "Anant Abhyas"
 )
 
-// ग्लोबल शेयर्ड इंजन्स (पॉइंटर डिक्लेरेशन - nil रनटाइम पैनिक से रक्षित)
 var (
 	clockEngine          = temporal.NewClockEngine()
 	contactFilter        *featurephone.ContactFilter
@@ -111,7 +110,7 @@ func handleIncomingCommunication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. अभिभावक इंटेंट रूटिंग (पिन रीसेट, अनलॉक और बायपास)
+	// 2. अभिभावक सुरक्षा इंटेंट रूटिंग (पिन रीसेट, अनलॉक और बायपास)
 	if pinMgr != nil {
 		if upperBody == "UNLOCK" || upperBody == "OVERRIDE" || strings.HasPrefix(upperBody, "OTP-") {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -150,14 +149,20 @@ func handleIncomingCommunication(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 3. लाइव अध्ययन प्रगति रिपोर्ट (बिना किसी डमी टेक्स्ट के)
 	if upperBody == "REPORT" || upperBody == "प्रगति" {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("📊 आज की अध्ययन प्रगति रिपोर्ट तैयार की जा रही है। कुछ ही क्षणों में विस्तृत ब्योरा प्राप्त होगा।"))
+		if weeklyReportEngine != nil {
+			reportText := weeklyReportEngine.GenerateSummary(cleanFrom)
+			w.Write([]byte(reportText))
+			return
+		}
+		w.Write([]byte("📊 वर्तमान में डेटाबेस से प्रगति रिपोर्ट प्राप्त नहीं हो सकी। कृपया कुछ समय पश्चात पुनः प्रयास करें।"))
 		return
 	}
 
-	// 3. छात्र स्वास्थ्य व वेलनेस इंटेंट
+	// 4. छात्र स्वास्थ्य व वेलनेस इंटेंट
 	if wellnessEngine != nil && wellnessEngine.DetectSicknessFromMessage(cleanBody) {
 		reply := wellnessEngine.MarkStudentSick(cleanFrom, "विद्यार्थी", "दैनिक अभ्यास")
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -174,14 +179,13 @@ func handleIncomingCommunication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. ऑनबोर्डिंग व दैनिक 15-मिनट अभ्यास प्रवाह
+	// 5. ऑनबोर्डिंग व दैनिक 15-मिनट अभ्यास प्रवाह
 	reply := fullOnboardingEngine.ProcessMessage(cleanFrom, cleanBody)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(reply))
 }
 
-// डायनामिक HTML मेरिट सर्टिफिकेट रेंडरर
 func renderCertificateHTML(p *parental.CompleteParentProfile) string {
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="hi">
@@ -191,7 +195,7 @@ func renderCertificateHTML(p *parental.CompleteParentProfile) string {
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Montserrat:wght@400;600;700&display=swap');
     body { background-color: #0f172a; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; font-family: 'Montserrat', sans-serif; }
-    .cert-card { width: 850px; background: #ffffff; border: 12px solid #0f172a; outline: 3px solid #d97706; outline-offset: -8px; padding: 40px 50px; box-shadow: 0 25px 50px rgba(0,0,0,0.5); position: relative; color: #1e293b; background-image: radial-gradient(#f8fafc 90%%, #f1f5f9 100%%); }
+    .cert-card { width: 850px; background: #ffffff; border: 12px solid #0f172a; outline: 3px solid #d97706; outline-offset: -8px; padding: 40px 50px; box-shadow: 0 25px 50px rgba(0,0,0,0.5); position: relative; color: #1e293b; background-image: radial-gradient(#f8fafc 90%%%%, #f1f5f9 100%%%%); }
     .header { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #e2e8f0; padding-bottom: 15px; }
     .brand { display: flex; align-items: center; gap: 15px; }
     .brand h1 { font-family: 'Cinzel', serif; font-size: 24px; margin: 0; color: #0f172a; }
@@ -202,7 +206,7 @@ func renderCertificateHTML(p *parental.CompleteParentProfile) string {
     .highlight { color: #16a34a; }
     .indicator-tag { background: #0f172a; color: #ffffff; padding: 12px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }
     .badge { background: #d97706; padding: 4px 12px; border-radius: 3px; font-weight: 700; }
-    .stamp { width: 65px; height: 65px; border: 2px dashed #d97706; border-radius: 50%%; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #d97706; font-size: 8px; font-weight: 700; transform: rotate(-10deg); }
+    .stamp { width: 65px; height: 65px; border: 2px dashed #d97706; border-radius: 50%%%%; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #d97706; font-size: 8px; font-weight: 700; transform: rotate(-10deg); }
   </style>
 </head>
 <body>
@@ -258,16 +262,6 @@ func renderCertificateHTML(p *parental.CompleteParentProfile) string {
 </html>`, p.DemoID, p.ChildName, p.ParentName, p.ClassGrade, p.ExamGoalWing, p.ScoreOutOf20, p.TotalSolvingSec, p.IndicatorLevel)
 }
 
-type UltraClusterHub struct {
-	Brain          *learning.AdaptiveSystemBrain
-	ClusterMesh    *cluster.DynamicClusterMesh
-	AutoPayEngine  *finance.AutoPayManager
-	ParentFeedback *feedback.SupportEngineService
-	AppSupport     *support.AutoHealingEngine
-	Aggregator     *scale.HighConcurrencyAggregator
-}
-
-// 20 बैकग्राउंड सर्विसेज को मेमोरी में सक्रिय रखने वाला कंटेनर (GC प्रिवेंशन)
 type CoreEngineRegistry struct {
 	DemoSvc          *pricing.DemoService
 	PlanSvc          *pricing.PlanService
@@ -294,6 +288,16 @@ type CoreEngineRegistry struct {
 	AutoHealer       *internal.AutoHealerEngine
 }
 
+type UltraClusterHub struct {
+	Brain          *learning.AdaptiveSystemBrain
+	ClusterMesh    *cluster.DynamicClusterMesh
+	AutoPayEngine  *finance.AutoPayManager
+	ParentFeedback *feedback.SupportEngineService
+	AppSupport     *support.AutoHealingEngine
+	Aggregator     *scale.HighConcurrencyAggregator
+	CoreEngines    *CoreEngineRegistry
+}
+
 func main() {
 	log.Println("==========================================================")
 	log.Println("🚀 'अनंत अभ्यास अल्ट्रा' 360° प्रोडक्शन क्लस्टर लाइव")
@@ -318,7 +322,7 @@ func main() {
 		}
 	}
 
-	// 🔐 1. डेटाबेस-आधारित कोर सुरक्षा व वेलनेस इनिशियलाइज़ेशन (Zero-Trust)
+	// 🔐 1. डेटाबेस-आधारित कोर सुरक्षा, वेलनेस व रिपोर्ट इनिशियलाइज़ेशन
 	wellnessEngine = vacation.NewChildWellnessService(db)
 	pinMgr = security.NewPINManager(db)
 	weeklyReportEngine = monitor.NewWeeklyReportService(db)
@@ -348,22 +352,13 @@ func main() {
 	}
 	clusterMesh.StartAutoScalingWatchdog()
 
-	hub := &UltraClusterHub{
-		Brain:          brain,
-		ClusterMesh:    clusterMesh,
-		AutoPayEngine:  autoPayEngine,
-		ParentFeedback: parentFeedback,
-		AppSupport:     appSupport,
-		Aggregator:     aggregator,
-	}
-
-	// 4. 20 कोर बैकग्राउंड सर्विसेज की सुरक्षित बाइंडिंग
 	secKey := os.Getenv("APP_SECURITY_SECRET")
 	if secKey == "" {
 		secKey = "ANANT_ULTRA_SECURE_TOKEN_SECRET_2026"
 	}
 
-	_ = &CoreEngineRegistry{
+	// 4. सभी 20 कोर बैकग्राउंड सर्विसेज को Hub के साथ लाइव बाइंड करना
+	coreRegistry := &CoreEngineRegistry{
 		DemoSvc:          pricing.NewDemoService(db),
 		PlanSvc:          pricing.NewPlanService(db),
 		LoyaltySvc:       pricing.NewLoyaltyService(db),
@@ -388,11 +383,20 @@ func main() {
 		ImageEnhancer:    security.NewImageEnhancer(),
 		AutoHealer:       internal.NewAutoHealerEngine(AdminNumber, 400.0),
 	}
-	log.Println("✅ सभी 20 कोर बैकग्राउंड व सुरक्षा इंजन मेमोरी में सुरक्षित रूप से सक्रिय हैं।")
+
+	hub := &UltraClusterHub{
+		Brain:          brain,
+		ClusterMesh:    clusterMesh,
+		AutoPayEngine:  autoPayEngine,
+		ParentFeedback: parentFeedback,
+		AppSupport:     appSupport,
+		Aggregator:     aggregator,
+		CoreEngines:    coreRegistry,
+	}
+
+	log.Println("✅ सभी 20 कोर इंजन Hub के साथ पूर्णतः एकीकृत और लाइव हैं।")
 
 	// 5. HTTP एंडपॉइंट्स रूटिंग
-
-	// बेस वेब व एडमिन
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, `<h2>🎓 अनंत अभ्यास (रॉयल एफएमसी कॉरपोरेशन) लाइव है 24x7!</h2><p><a href="/admin">एडमिन पोर्टल</a></p>`)
@@ -414,7 +418,7 @@ func main() {
 		fmt.Fprintf(w, "<h2>अनंत अभ्यास एडमिन पोर्टल</h2><p>गेटवे: 9664006651 | एडमिन: 9024414973</p><p>समय (IST): %s</p>", snap.FormattedTimestamp)
 	})
 
-	// 🔐 ज़ीरो-ट्रस्ट मास्टर पिन एंडपॉइंट्स
+	// 🔐 ज़ीरो-ट्रस्ट मास्टर पिन वेरिफिकेशन
 	http.HandleFunc("/api/v1/parent/verify-pin", func(w http.ResponseWriter, r *http.Request) {
 		phone := r.URL.Query().Get("phone")
 		pin := r.URL.Query().Get("pin")
@@ -520,146 +524,4 @@ func main() {
 		})
 	})
 
-	http.HandleFunc("/api/v1/billing/calculate", func(w http.ResponseWriter, r *http.Request) {
-		tier := r.URL.Query().Get("tier")
-		hasExam := r.URL.Query().Get("exam_addon") == "true"
-
-		bill, err := newpricing.ComputeModularBill(tier, hasExam, 0, false)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(bill)
-	})
-
-	// 100% UPI ऑटो-पे मैंडेट रूट्स
-	http.HandleFunc("/api/v1/payment/setup-autopay", func(w http.ResponseWriter, r *http.Request) {
-		parentID := r.URL.Query().Get("parent_id")
-		tier := r.URL.Query().Get("tier")
-		hasExam := r.URL.Query().Get("exam_addon") == "true"
-
-		bill, err := newpricing.ComputeModularBill(tier, hasExam, 0, false)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		sub := hub.AutoPayEngine.SetupMandate(parentID, float64(bill.FinalPayable))
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":          "MANDATE_INITIATED",
-			"monthly_amount":  bill.FinalPayable,
-			"allowed_kids":    bill.AllowedKids,
-			"subscription_id": sub.SubscriptionID,
-			"message":         "UPI ऑटो-पे मैंडेट अधिकृत करें (नो-डिफ़ॉल्ट पॉलिसी)",
-		})
-	})
-
-	http.HandleFunc("/api/v1/payment/autopay-webhook", func(w http.ResponseWriter, r *http.Request) {
-		parentID := r.URL.Query().Get("parent_id")
-		bankUTR := r.URL.Query().Get("bank_utr")
-		success := r.URL.Query().Get("status") == "SUCCESS"
-
-		err := hub.AutoPayEngine.HandleAutoDebitWebhook(parentID, bankUTR, success)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusPaymentRequired)
-			return
-		}
-
-		hub.Brain.ProcessFeedbackAndFinance("PAYMENT_SETTLED", bankUTR)
-		w.Write([]byte(`{"status":"SETTLEMENT_CONFIRMED_AND_UNLOCKED"}`))
-	})
-
-	// इन-ऐप गवर्नमेंट CBT विंडो
-	http.HandleFunc("/api/v1/cbt/submit", func(w http.ResponseWriter, r *http.Request) {
-		var sub exam.CBTSessionSubmission
-		if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
-			http.Error(w, "अमान्य CBT डेटा", http.StatusBadRequest)
-			return
-		}
-
-		mockKey := map[string]string{"q1": "A", "q2": "B", "q3": "C", "q4": "D"}
-		res := exam.EvaluateCBTSession(sub, mockKey)
-
-		hub.Brain.IngestEvent(learning.SystemEvent{
-			EventType: "EXAM_SUBMIT",
-			TrackCode: sub.TrackCode,
-			Score:     res.Score,
-			Timestamp: time.Now(),
-		})
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(res)
-	})
-
-	// 30-सेकंड पिंग बफर
-	http.HandleFunc("/api/v1/ping", func(w http.ResponseWriter, r *http.Request) {
-		sID := r.URL.Query().Get("student_id")
-		if sID == "" {
-			http.Error(w, "student_id आवश्यक", http.StatusBadRequest)
-			return
-		}
-		hub.Aggregator.QueuePing(scale.PingPayload{
-			StudentID: sID,
-			ActiveSec: 30,
-			Timestamp: time.Now().Unix(),
-		})
-		w.Write([]byte(`{"status":"ACK"}`))
-	})
-
-	// WhatsApp सपोर्ट व ऑटो-हीलिंग
-	http.HandleFunc("/api/v1/whatsapp/webhook", func(w http.ResponseWriter, r *http.Request) {
-		phone := r.URL.Query().Get("phone")
-		msg := r.URL.Query().Get("message")
-		reply, handled := hub.ParentFeedback.ProcessFeedbackAndHeal(phone, msg)
-		if !handled {
-			reply = "नमस्ते! 'अनंत अभ्यास' में आपका स्वागत है। अभ्यास शुरू करने के लिए START लिखें।"
-		}
-		w.Write([]byte(reply))
-	})
-
-	// इन-ऐप क्रैश हुक
-	http.HandleFunc("/api/v1/app/support-hook", func(w http.ResponseWriter, r *http.Request) {
-		parentID := r.URL.Query().Get("parent_id")
-		rawError := r.URL.Query().Get("error_log")
-
-		ticket := hub.AppSupport.IngestAndAutoResolve("IN_APP_CRASH_HOOK", parentID, rawError)
-		hub.Brain.ProcessFeedbackAndFinance(string(ticket.Type), rawError)
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(ticket)
-	})
-
-	// एडमिन स्टैट्स
-	http.HandleFunc("/api/v1/admin/stats", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"system":        "Anant Abhyas Ultra Core",
-			"cluster_state": "ACTIVE",
-			"auto_pay":      "ENFORCED_MANDATE_ONLY",
-			"active_tracks": []string{"NAVODAYA", "SAINIK_SCHOOL", "NDA", "IIT_JEE"},
-		})
-	})
-
-	// ⚡ ऑटोनोमस सैंडबॉक्स ट्रायल कोर
-	sandboxCore := sandbox.NewAutonomousSandboxCore(AdminNumber, db, func(from, body string) string {
-		if wellnessEngine != nil && wellnessEngine.DetectSicknessFromMessage(body) {
-			return wellnessEngine.MarkStudentSick(from, "सैंडबॉक्स छात्र", "दैनिक अभ्यास")
-		}
-		return fullOnboardingEngine.ProcessMessage(from, body)
-	})
-
-	http.HandleFunc("/sandbox", sandboxCore.RenderSandboxUI)
-	http.HandleFunc("/api/v1/sandbox/simulate", sandboxCore.HandleSimulation)
-	http.HandleFunc("/api/v1/sandbox/toggle", sandboxCore.ToggleSimulationStates)
-	http.HandleFunc("/api/v1/sandbox/audit", sandboxCore.ServeAuditReport)
-
-	// 6. सर्वर स्टार्टअप
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-	log.Printf("🚀 अनंत अभ्यास क्लस्टर पोर्ट :%s पर पूर्णतः सक्रिय है...", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
-}
+	http.HandleFunc("/api/v1/billing/calculate", func(w http.ResponseWriter, r *http.Request) 
