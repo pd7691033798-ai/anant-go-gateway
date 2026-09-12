@@ -522,4 +522,144 @@ func main() {
 
 	http.HandleFunc("/api/v1/billing/calculate", func(w http.ResponseWriter, r *http.Request) {
 		tier := r.URL.Query().Get("tier")
-		hasExam := r.URL.Query().Get("exam
+		hasExam := r.URL.Query().Get("exam_addon") == "true"
+
+		bill, err := newpricing.ComputeModularBill(tier, hasExam, 0, false)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(bill)
+	})
+
+	// 100% UPI ऑटो-पे मैंडेट रूट्स
+	http.HandleFunc("/api/v1/payment/setup-autopay", func(w http.ResponseWriter, r *http.Request) {
+		parentID := r.URL.Query().Get("parent_id")
+		tier := r.URL.Query().Get("tier")
+		hasExam := r.URL.Query().Get("exam_addon") == "true"
+
+		bill, err := newpricing.ComputeModularBill(tier, hasExam, 0, false)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		sub := hub.AutoPayEngine.SetupMandate(parentID, float64(bill.FinalPayable))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":          "MANDATE_INITIATED",
+			"monthly_amount":  bill.FinalPayable,
+			"allowed_kids":    bill.AllowedKids,
+			"subscription_id": sub.SubscriptionID,
+			"message":         "UPI ऑटो-पे मैंडेट अधिकृत करें (नो-डिफ़ॉल्ट पॉलिसी)",
+		})
+	})
+
+	http.HandleFunc("/api/v1/payment/autopay-webhook", func(w http.ResponseWriter, r *http.Request) {
+		parentID := r.URL.Query().Get("parent_id")
+		bankUTR := r.URL.Query().Get("bank_utr")
+		success := r.URL.Query().Get("status") == "SUCCESS"
+
+		err := hub.AutoPayEngine.HandleAutoDebitWebhook(parentID, bankUTR, success)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusPaymentRequired)
+			return
+		}
+
+		hub.Brain.ProcessFeedbackAndFinance("PAYMENT_SETTLED", bankUTR)
+		w.Write([]byte(`{"status":"SETTLEMENT_CONFIRMED_AND_UNLOCKED"}`))
+	})
+
+	// इन-ऐप गवर्नमेंट CBT विंडो
+	http.HandleFunc("/api/v1/cbt/submit", func(w http.ResponseWriter, r *http.Request) {
+		var sub exam.CBTSessionSubmission
+		if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
+			http.Error(w, "अमान्य CBT डेटा", http.StatusBadRequest)
+			return
+		}
+
+		mockKey := map[string]string{"q1": "A", "q2": "B", "q3": "C", "q4": "D"}
+		res := exam.EvaluateCBTSession(sub, mockKey)
+
+		hub.Brain.IngestEvent(learning.SystemEvent{
+			EventType: "EXAM_SUBMIT",
+			TrackCode: sub.TrackCode,
+			Score:     res.Score,
+			Timestamp: time.Now(),
+		})
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(res)
+	})
+
+	// 30-सेकंड पिंग बफर
+	http.HandleFunc("/api/v1/ping", func(w http.ResponseWriter, r *http.Request) {
+		sID := r.URL.Query().Get("student_id")
+		if sID == "" {
+			http.Error(w, "student_id आवश्यक", http.StatusBadRequest)
+			return
+		}
+		hub.Aggregator.QueuePing(scale.PingPayload{
+			StudentID: sID,
+			ActiveSec: 30,
+			Timestamp: time.Now().Unix(),
+		})
+		w.Write([]byte(`{"status":"ACK"}`))
+	})
+
+	// WhatsApp सपोर्ट व ऑटो-हीलिंग
+	http.HandleFunc("/api/v1/whatsapp/webhook", func(w http.ResponseWriter, r *http.Request) {
+		phone := r.URL.Query().Get("phone")
+		msg := r.URL.Query().Get("message")
+		reply, handled := hub.ParentFeedback.ProcessFeedbackAndHeal(phone, msg)
+		if !handled {
+			reply = "नमस्ते! 'अनंत अभ्यास' में आपका स्वागत है। अभ्यास शुरू करने के लिए START लिखें।"
+		}
+		w.Write([]byte(reply))
+	})
+
+	// इन-ऐप क्रैश हुक
+	http.HandleFunc("/api/v1/app/support-hook", func(w http.ResponseWriter, r *http.Request) {
+		parentID := r.URL.Query().Get("parent_id")
+		rawError := r.URL.Query().Get("error_log")
+
+		ticket := hub.AppSupport.IngestAndAutoResolve("IN_APP_CRASH_HOOK", parentID, rawError)
+		hub.Brain.ProcessFeedbackAndFinance(string(ticket.Type), rawError)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ticket)
+	})
+
+	// एडमिन स्टैट्स
+	http.HandleFunc("/api/v1/admin/stats", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"system":        "Anant Abhyas Ultra Core",
+			"cluster_state": "ACTIVE",
+			"auto_pay":      "ENFORCED_MANDATE_ONLY",
+			"active_tracks": []string{"NAVODAYA", "SAINIK_SCHOOL", "NDA", "IIT_JEE"},
+		})
+	})
+
+	// ⚡ ऑटोनोमस सैंडबॉक्स ट्रायल कोर
+	sandboxCore := sandbox.NewAutonomousSandboxCore(AdminNumber, db, func(from, body string) string {
+		if wellnessEngine != nil && wellnessEngine.DetectSicknessFromMessage(body) {
+			return wellnessEngine.MarkStudentSick(from, "सैंडबॉक्स छात्र", "दैनिक अभ्यास")
+		}
+		return fullOnboardingEngine.ProcessMessage(from, body)
+	})
+
+	http.HandleFunc("/sandbox", sandboxCore.RenderSandboxUI)
+	http.HandleFunc("/api/v1/sandbox/simulate", sandboxCore.HandleSimulation)
+	http.HandleFunc("/api/v1/sandbox/toggle", sandboxCore.ToggleSimulationStates)
+	http.HandleFunc("/api/v1/sandbox/audit", sandboxCore.ServeAuditReport)
+
+	// 6. सर्वर स्टार्टअप
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	log.Printf("🚀 अनंत अभ्यास क्लस्टर पोर्ट :%s पर पूर्णतः सक्रिय है...", port)
+	log.Fatal(http.ListenAndServe(":"+port, nil))
+}
