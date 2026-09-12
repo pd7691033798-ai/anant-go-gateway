@@ -7,10 +7,10 @@ CREATE TABLE IF NOT EXISTS users (
     phone VARCHAR(20) PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     grade INT NOT NULL,
-    state VARCHAR(50),                         -- ऑनबोर्डिंग से डायनामिक इनपुट (कोई डिफ़ॉल्ट हार्डकोड नहीं)
-    district VARCHAR(50),                      -- छात्र का वास्तविक जिला
-    preferred_dialect VARCHAR(50) DEFAULT 'HINDI_STANDARD', -- न्यूट्रल बेस लैंग्वेज
-    custom_interest_topic VARCHAR(100),        -- बच्चे की व्यक्तिगत रुचि
+    state VARCHAR(50),                         -- ऑनबोर्डिंग द्वारा निर्धारित (कोई हार्डकोडेड राज्य नहीं)
+    district VARCHAR(50),                      -- ऑनबोर्डिंग द्वारा निर्धारित (कोई हार्डकोडेड जिला नहीं)
+    preferred_dialect VARCHAR(50),             -- शुद्ध डायनामिक (यूजर चयन/डिटेक्शन पर आधारित, कोई भाषा पक्षपात नहीं)
+    custom_interest_topic VARCHAR(100),        -- बच्चे की व्यक्तिगत रुचि (डायनामिक AI प्रोफाइलिंग)
     plan_tier VARCHAR(20) DEFAULT 'DEMO',
     plan_expires_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() + INTERVAL '7 days',
     consecutive_paid_months INT DEFAULT 1,
@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS users (
     last_mandate_status VARCHAR(30) DEFAULT 'ACTIVE'
 );
 
--- 2. State Academic Calendars (पैन-इंडिया 28 राज्यों व यूटी का अवकाश कैलेंडर)
+-- 2. State Academic Calendars (पैन-इंडिया 28 राज्यों व केंद्र शासित प्रदेशों का अवकाश कैलेंडर)
 CREATE TABLE IF NOT EXISTS state_academic_calendars (
     id SERIAL PRIMARY KEY,
     state VARCHAR(50) NOT NULL,
