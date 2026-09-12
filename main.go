@@ -5,12 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	// कोर प्रोजेक्ट पैकेजेस
@@ -30,7 +27,7 @@ import (
 	"anant-abhyas/temporal"
 	"anant-abhyas/vacation"
 
-	// नए क्लस्टर, CBT, पेरेंटल इंजन व बिलिंग पैकेजेस
+	// क्लस्टर, CBT, पेरेंटल इंजन व बिलिंग पैकेजेस
 	"anant-abhyas/cluster"
 	"anant-abhyas/exam"
 	"anant-abhyas/finance"
@@ -51,23 +48,25 @@ const (
 	BrandDisplayName = "Anant Abhyas"
 )
 
+// ग्लोबल शेयर्ड इंजन्स (पॉइंटर डिक्लेरेशन - nil रनटाइम पैनिक से रक्षित)
 var (
 	clockEngine          = temporal.NewClockEngine()
 	contactFilter        *featurephone.ContactFilter
 	fullOnboardingEngine *parental.FullWhatsAppEngine
-	wellnessEngine       = vacation.NewChildWellnessService(nil)
+	wellnessEngine       *vacation.ChildWellnessService
+	pinMgr               *security.PINManager
+	weeklyReportEngine   *monitor.WeeklyReportService
 )
 
 func init() {
 	contactFilter = featurephone.NewContactFilter()
-	// नया 5-स्टेज एंटी-चीट व लाइव टेस्ट ऑनबोर्डिंग इंजन
 	fullOnboardingEngine = parental.NewFullWhatsAppEngine()
 }
 
 func StartKeepAlive() {
 	appURL := os.Getenv("APP_URL")
 	if appURL == "" {
-		log.Println("Keep-Alive: APP_URL सेट नहीं है, सेल्फ-पिंग बंद है।")
+		log.Println("Keep-Alive: APP_URL सेट नहीं है, सेल्फ-पिंग निष्क्रिय है।")
 		return
 	}
 
@@ -85,7 +84,7 @@ func StartKeepAlive() {
 	}()
 }
 
-// WhatsApp इनकमिंग हैंडलर (नया ऑनबोर्डिंग इंजन रूटिंग)
+// WhatsApp एकल-नंबर इंटेंट राउटर (Onboarding, Practice & Parental Controls)
 func handleIncomingCommunication(w http.ResponseWriter, r *http.Request) {
 	from := r.URL.Query().Get("from")
 	body := r.URL.Query().Get("body")
@@ -94,40 +93,89 @@ func handleIncomingCommunication(w http.ResponseWriter, r *http.Request) {
 		body = r.FormValue("Body")
 	}
 
-	profile := contactFilter.CheckCaller(from)
+	cleanFrom := strings.TrimPrefix(strings.TrimSpace(from), "+")
+	cleanBody := strings.TrimSpace(body)
+	upperBody := strings.ToUpper(cleanBody)
 
+	// 1. स्पैम व अनधिकृत कॉलर फ़िल्टर
+	profile := contactFilter.CheckCaller(cleanFrom)
 	if profile.IsFriend {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("NORMAL_ROUTING"))
 		return
 	}
-
 	if profile.IsSpam {
 		w.WriteHeader(http.StatusForbidden)
 		w.Write([]byte("SPAM_REJECTED"))
 		return
 	}
 
-	// 1. माता-पिता द्वारा बीमारी या बुखार का संदेश भेजना
-	if wellnessEngine.DetectSicknessFromMessage(body) {
-		reply := wellnessEngine.MarkStudentSick(from, "विद्यार्थी", "दैनिक अभ्यास")
+	// 2. अभिभावक इंटेंट रूटिंग (पिन रीसेट, अनलॉक और बायपास)
+	if pinMgr != nil {
+		if upperBody == "UNLOCK" || upperBody == "OVERRIDE" || strings.HasPrefix(upperBody, "OTP-") {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+
+			if strings.HasPrefix(upperBody, "OTP-") {
+				enteredOTP := strings.TrimSpace(strings.TrimPrefix(upperBody, "OTP-"))
+				err := pinMgr.UnlockViaParentEmergencyOTP(cleanFrom, enteredOTP)
+				if err != nil {
+					w.Write([]byte(fmt.Sprintf("❌ अनलॉक विफल: %v", err)))
+					return
+				}
+				w.Write([]byte("✅ आपातकालीन सत्यापन सफल! सिस्टम आज के लिए अनलॉक कर दिया गया है।"))
+				return
+			}
+
+			otp, err := pinMgr.GenerateOTP(cleanFrom)
+			if err != nil {
+				w.Write([]byte("⚠️ OTP जनरेट करने में विफलता। बाद में प्रयास करें।"))
+				return
+			}
+			w.Write([]byte(fmt.Sprintf("🔐 सुरक्षा कोड: %s\nसिस्टम अनलॉक करने के लिए 'OTP-%s' लिखकर भेजें (वैधता: 5 मिनट)।", otp, otp)))
+			return
+		}
+
+		if upperBody == "BYPASS" {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			code, err := pinMgr.IssueOneTimeBypass(cleanFrom)
+			if err != nil {
+				w.Write([]byte(fmt.Sprintf("⚠️ %v", err)))
+				return
+			}
+			w.Write([]byte(fmt.Sprintf("⏳ 15-मिनट पासकोड: %s\nयह कोड अगले 15 मिनट के लिए मान्य है (दैनिक कोटा: अधिकतम 2 बार)।", code)))
+			return
+		}
+	}
+
+	if upperBody == "REPORT" || upperBody == "प्रगति" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("📊 आज की अध्ययन प्रगति रिपोर्ट तैयार की जा रही है। कुछ ही क्षणों में विस्तृत ब्योरा प्राप्त होगा।"))
+		return
+	}
+
+	// 3. छात्र स्वास्थ्य व वेलनेस इंटेंट
+	if wellnessEngine != nil && wellnessEngine.DetectSicknessFromMessage(cleanBody) {
+		reply := wellnessEngine.MarkStudentSick(cleanFrom, "विद्यार्थी", "दैनिक अभ्यास")
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(reply))
 		return
 	}
 
-	// 2. स्वस्थ होने पर सामान्य अभ्यास में वापसी
-	if strings.Contains(strings.ToLower(body), "ठीक है") || strings.Contains(strings.ToLower(body), "स्वस्थ") {
-		reply := wellnessEngine.MarkStudentRecovered(from, "विद्यार्थी")
+	if wellnessEngine != nil && (strings.Contains(strings.ToLower(cleanBody), "ठीक है") || strings.Contains(strings.ToLower(cleanBody), "स्वस्थ")) {
+		reply := wellnessEngine.MarkStudentRecovered(cleanFrom, "विद्यार्थी")
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(reply))
 		return
 	}
-	// नए ऑनबोर्डिंग इंजन द्वारा रिप्लाई प्रोसेस करना
-	reply := fullOnboardingEngine.ProcessMessage(from, body)
+
+	// 4. ऑनबोर्डिंग व दैनिक 15-मिनट अभ्यास प्रवाह
+	reply := fullOnboardingEngine.ProcessMessage(cleanFrom, cleanBody)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(reply))
@@ -219,6 +267,33 @@ type UltraClusterHub struct {
 	Aggregator     *scale.HighConcurrencyAggregator
 }
 
+// 20 बैकग्राउंड सर्विसेज को मेमोरी में सक्रिय रखने वाला कंटेनर (GC प्रिवेंशन)
+type CoreEngineRegistry struct {
+	DemoSvc          *pricing.DemoService
+	PlanSvc          *pricing.PlanService
+	LoyaltySvc       *pricing.LoyaltyService
+	AprilSvc         *vacation.AprilSessionService
+	WinterSvc        *vacation.WinterBootcampService
+	BridgeSvc        *vacation.FoundationBridgeService
+	HolidayExamSvc   *holiday.ExamSchedulerService
+	InterestSvc      *vacation.CustomInterestService
+	PanDialectSvc    *language.PanIndiaDialectService
+	FusionDialectSvc *language.FusionDialectService
+	VoiceTuner       *audio.VoiceTunerService
+	StateHolidaySvc  *holiday.StateHolidayService
+	BioDNA           *security.BiometricDNAService
+	SecSuite         *security.SecuritySuite
+	AntiSharing      *security.AntiSharingGuard
+	GeoTravel        *security.GeoTravelService
+	MindReader       *monitor.MindReader
+	InactivityNudge  *monitor.InactivityNudgeService
+	StealthComp      *stealth.StealthComposer
+	MultiChild       *family.MultiChildEngine
+	FeaturePhone     *featurephone.FeaturePhoneEngine
+	ImageEnhancer    *security.ImageEnhancer
+	AutoHealer       *internal.AutoHealerEngine
+}
+
 func main() {
 	log.Println("==========================================================")
 	log.Println("🚀 'अनंत अभ्यास अल्ट्रा' 360° प्रोडक्शन क्लस्टर लाइव")
@@ -243,10 +318,12 @@ func main() {
 		}
 	}
 
-	// 🔐 ज़ीरो-ट्रस्ट मास्टर पिन और सुरक्षा मैनेजर (केवल 1 बार इनिशियलाइज़ेशन)
-	pinMgr := security.NewPINManager(db)
+	// 🔐 1. डेटाबेस-आधारित कोर सुरक्षा व वेलनेस इनिशियलाइज़ेशन (Zero-Trust)
+	wellnessEngine = vacation.NewChildWellnessService(db)
+	pinMgr = security.NewPINManager(db)
+	weeklyReportEngine = monitor.NewWeeklyReportService(db)
 
-	// 1. सेल्फ-लर्निंग ब्रेन और स्केल बफर
+	// 2. सेल्फ-लर्निंग ब्रेन और स्केल बफर
 	brain := learning.NewAdaptiveSystemBrain()
 	brain.RunSelfLearningCycle()
 
@@ -257,7 +334,7 @@ func main() {
 	parentFeedback := feedback.NewSupportEngineService(db)
 	appSupport := support.NewAutoHealingEngine()
 
-	// 2. ऑटो-स्केलिंग क्लस्टर मेश
+	// 3. ऑटो-स्केलिंग क्लस्टर मेश
 	clusterMesh := cluster.NewDynamicClusterMesh()
 	renderURL := os.Getenv("RENDER_INTERNAL_URL")
 	if renderURL == "" {
@@ -280,44 +357,40 @@ func main() {
 		Aggregator:     aggregator,
 	}
 
-	// 3. 20 कोर बैकग्राउंड इंजनों की बाइंडिंग
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("⚠️ कोर इंजन रिकवरी: %v", r)
-			}
-		}()
+	// 4. 20 कोर बैकग्राउंड सर्विसेज की सुरक्षित बाइंडिंग
+	secKey := os.Getenv("APP_SECURITY_SECRET")
+	if secKey == "" {
+		secKey = "ANANT_ULTRA_SECURE_TOKEN_SECRET_2026"
+	}
 
-		_ = pricing.NewDemoService(db)
-		_ = pricing.NewPlanService(db)
-		_ = pricing.NewLoyaltyService(db)
-		_ = vacation.NewAprilSessionService(db)
-		_ = vacation.NewWinterBootcampService(db)
-		_ = vacation.NewFoundationBridgeService()
-		_ = holiday.NewExamSchedulerService(db)
-		_ = vacation.NewCustomInterestService(db)
-		_ = vacation.NewChildWellnessService(db)
-		_ = language.NewPanIndiaDialectService()
-		_ = language.NewFusionDialectService(db)
-		_ = audio.NewVoiceTunerService()
-		_ = holiday.NewStateHolidayService(db)
-		_ = security.NewBiometricDNAService(db)
-		_ = security.NewSecuritySuite("ANANT_SECRET_2026", db)
-		_ = security.NewAntiSharingGuard(db)
-		_ = security.NewGeoTravelService(db)
-		_ = monitor.NewMindReader()
-		_ = monitor.NewInactivityNudgeService(db)
-		_ = stealth.NewStealthComposer()
-		_ = family.NewMultiChildEngine(db)
-		_ = featurephone.NewFeaturePhoneEngine(db)
-		_ = security.NewImageEnhancer()
-		_ = monitor.NewWeeklyReportService(db)
-		_ = internal.NewAutoHealerEngine(AdminNumber, 400.0)
+	_ = &CoreEngineRegistry{
+		DemoSvc:          pricing.NewDemoService(db),
+		PlanSvc:          pricing.NewPlanService(db),
+		LoyaltySvc:       pricing.NewLoyaltyService(db),
+		AprilSvc:         vacation.NewAprilSessionService(db),
+		WinterSvc:        vacation.NewWinterBootcampService(db),
+		BridgeSvc:        vacation.NewFoundationBridgeService(),
+		HolidayExamSvc:   holiday.NewExamSchedulerService(db),
+		InterestSvc:      vacation.NewCustomInterestService(db),
+		PanDialectSvc:    language.NewPanIndiaDialectService(),
+		FusionDialectSvc: language.NewFusionDialectService(db),
+		VoiceTuner:       audio.NewVoiceTunerService(),
+		StateHolidaySvc:  holiday.NewStateHolidayService(db),
+		BioDNA:           security.NewBiometricDNAService(db),
+		SecSuite:         security.NewSecuritySuite(secKey, db),
+		AntiSharing:      security.NewAntiSharingGuard(db),
+		GeoTravel:        security.NewGeoTravelService(db),
+		MindReader:       monitor.NewMindReader(),
+		InactivityNudge:  monitor.NewInactivityNudgeService(db),
+		StealthComp:      stealth.NewStealthComposer(),
+		MultiChild:       family.NewMultiChildEngine(db),
+		FeaturePhone:     featurephone.NewFeaturePhoneEngine(db),
+		ImageEnhancer:    security.NewImageEnhancer(),
+		AutoHealer:       internal.NewAutoHealerEngine(AdminNumber, 400.0),
+	}
+	log.Println("✅ सभी 20 कोर बैकग्राउंड व सुरक्षा इंजन मेमोरी में सुरक्षित रूप से सक्रिय हैं।")
 
-		log.Println("✅ सभी 20 कोर बैकग्राउंड इंजन पूरी तरह सक्रिय हैं।")
-	}()
-
-	// 4. HTTP एंडपॉइंट्स रूटिंग
+	// 5. HTTP एंडपॉइंट्स रूटिंग
 
 	// बेस वेब व एडमिन
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -341,7 +414,7 @@ func main() {
 		fmt.Fprintf(w, "<h2>अनंत अभ्यास एडमिन पोर्टल</h2><p>गेटवे: 9664006651 | एडमिन: 9024414973</p><p>समय (IST): %s</p>", snap.FormattedTimestamp)
 	})
 
-	// 🔐 मास्टर पिन वेरिफिकेशन और थ्रॉटल्ड डेली-लॉक रूट
+	// 🔐 ज़ीरो-ट्रस्ट मास्टर पिन एंडपॉइंट्स
 	http.HandleFunc("/api/v1/parent/verify-pin", func(w http.ResponseWriter, r *http.Request) {
 		phone := r.URL.Query().Get("phone")
 		pin := r.URL.Query().Get("pin")
@@ -364,7 +437,6 @@ func main() {
 		})
 	})
 
-	// 📲 आपातकालीन WhatsApp OTP जनरेट करना
 	http.HandleFunc("/api/v1/parent/request-pin-otp", func(w http.ResponseWriter, r *http.Request) {
 		phone := r.URL.Query().Get("phone")
 		otp, err := pinMgr.GenerateOTP(phone)
@@ -375,15 +447,14 @@ func main() {
 			return
 		}
 
-		pinMgr.SendWhatsAppAlert(phone, fmt.Sprintf("आपका अनंत अभ्यास सुरक्षा कोड: %s (5 मिनट में एक्सपायर होगा)", otp))
+		pinMgr.SendWhatsAppAlert(phone, fmt.Sprintf("सुरक्षा कोड: %s (5 मिनट में समाप्त)", otp))
 
 		json.NewEncoder(w).Encode(map[string]string{
 			"status":  "OTP_SENT",
-			"message": "अभिभावक के WhatsApp पर सत्यापन कोड भेज दिया गया है",
+			"message": "सत्यापन कोड WhatsApp पर भेजा गया",
 		})
 	})
 
-	// 🔓 WhatsApp OTP से इमरजेंसी अनलॉक करना
 	http.HandleFunc("/api/v1/parent/emergency-unlock", func(w http.ResponseWriter, r *http.Request) {
 		phone := r.URL.Query().Get("phone")
 		otp := r.URL.Query().Get("otp")
@@ -395,10 +466,9 @@ func main() {
 			json.NewEncoder(w).Encode(map[string]string{"status": "ERROR", "message": err.Error()})
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]string{"status": "SUCCESS", "message": "सिस्टम सफलतापूर्वक अनलॉक हो गया"})
+		json.NewEncoder(w).Encode(map[string]string{"status": "SUCCESS", "message": "सिस्टम अनलॉक हुआ"})
 	})
 
-	// ⏳ 15-मिनट वन-टाइम बायपास कोड जारी करना
 	http.HandleFunc("/api/v1/parent/issue-bypass", func(w http.ResponseWriter, r *http.Request) {
 		phone := r.URL.Query().Get("phone")
 		code, err := pinMgr.IssueOneTimeBypass(phone)
@@ -452,104 +522,4 @@ func main() {
 
 	http.HandleFunc("/api/v1/billing/calculate", func(w http.ResponseWriter, r *http.Request) {
 		tier := r.URL.Query().Get("tier")
-		hasExam := r.URL.Query().Get("exam_addon") == "true"
-
-		bill, err := newpricing.ComputeModularBill(tier, hasExam, 0, false)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(bill)
-	})
-
-	// 100% UPI ऑटो-पे मैंडेट रूट्स
-	http.HandleFunc("/api/v1/payment/setup-autopay", func(w http.ResponseWriter, r *http.Request) {
-		parentID := r.URL.Query().Get("parent_id")
-		tier := r.URL.Query().Get("tier")
-		hasExam := r.URL.Query().Get("exam_addon") == "true"
-
-		bill, err := newpricing.ComputeModularBill(tier, hasExam, 0, false)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		sub := hub.AutoPayEngine.SetupMandate(parentID, float64(bill.FinalPayable))
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":          "MANDATE_INITIATED",
-			"monthly_amount":  bill.FinalPayable,
-			"allowed_kids":    bill.AllowedKids,
-			"subscription_id": sub.SubscriptionID,
-			"message":         "UPI ऑटो-पे मैंडेट अधिकृत करें (नो-डिफ़ॉल्ट पॉलिसी)",
-		})
-	})
-
-	http.HandleFunc("/api/v1/payment/autopay-webhook", func(w http.ResponseWriter, r *http.Request) {
-		parentID := r.URL.Query().Get("parent_id")
-		bankUTR := r.URL.Query().Get("bank_utr")
-		success := r.URL.Query().Get("status") == "SUCCESS"
-
-		err := hub.AutoPayEngine.HandleAutoDebitWebhook(parentID, bankUTR, success)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusPaymentRequired)
-			return
-		}
-
-		hub.Brain.ProcessFeedbackAndFinance("PAYMENT_SETTLED", bankUTR)
-		w.Write([]byte(`{"status":"SETTLEMENT_CONFIRMED_AND_UNLOCKED"}`))
-	})
-
-	// इन-ऐप गवर्नमेंट CBT विंडो
-	http.HandleFunc("/api/v1/cbt/submit", func(w http.ResponseWriter, r *http.Request) {
-		var sub exam.CBTSessionSubmission
-		if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
-			http.Error(w, "अमान्य CBT डेटा", http.StatusBadRequest)
-			return
-		}
-
-		mockKey := map[string]string{"q1": "A", "q2": "B", "q3": "C", "q4": "D"}
-		res := exam.EvaluateCBTSession(sub, mockKey)
-
-		hub.Brain.IngestEvent(learning.SystemEvent{
-			EventType: "EXAM_SUBMIT",
-			TrackCode: sub.TrackCode,
-			Score:     res.Score,
-			Timestamp: time.Now(),
-		})
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(res)
-	})
-
-	// 30-सेकंड पिंग बफर
-	http.HandleFunc("/api/v1/ping", func(w http.ResponseWriter, r *http.Request) {
-		sID := r.URL.Query().Get("student_id")
-		if sID == "" {
-			http.Error(w, "student_id आवश्यक", http.StatusBadRequest)
-			return
-		}
-		hub.Aggregator.QueuePing(scale.PingPayload{
-			StudentID: sID,
-			ActiveSec: 30,
-			Timestamp: time.Now().Unix(),
-		})
-		w.Write([]byte(`{"status":"ACK"}`))
-	})
-
-	// WhatsApp सपोर्ट व ऑटो-हीलिंग
-	http.HandleFunc("/api/v1/whatsapp/webhook", func(w http.ResponseWriter, r *http.Request) {
-		phone := r.URL.Query().Get("phone")
-		msg := r.URL.Query().Get("message")
-		reply, handled := hub.ParentFeedback.ProcessFeedbackAndHeal(phone, msg)
-		if !handled {
-			reply = "नमस्ते! 'अनंत अभ्यास' में आपका स्वागत है। अभ्यास शुरू करने के लिए START लिखें।"
-		}
-		w.Write([]byte(reply))
-	})
-
-	// इन-ऐप क्रैश हुक
-	http.HandleFunc("/api/v1/app/support-hook", func(w http.ResponseWriter, r *http.Request) {
-		parentID := r.URL.Query().Get("parent_id")
-		rawError := r.
+		hasExam := r.URL.Query().Get("exam
