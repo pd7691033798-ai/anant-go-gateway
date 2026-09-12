@@ -71,7 +71,7 @@ func (sl *StrictDailyLimiter) CheckLimit(phone string) (bool, string) {
 	query := `SELECT pin_locked_until, failed_attempts FROM users WHERE phone = $1`
 	err := sl.db.QueryRow(query, cleanPhone).Scan(&lockedUntil, &failedAttempts)
 	if err != nil {
-		return true, "" // यदि नया यूजर है, तो अनुमति दें
+		return true, ""
 	}
 
 	now := time.Now()
@@ -96,7 +96,7 @@ func (sl *StrictDailyLimiter) RecordFailure(phone string) (int, bool) {
 		    last_failed_at = NOW()
 		WHERE phone = $1
 		RETURNING failed_attempts`
-	
+
 	err := sl.db.QueryRow(query, cleanPhone).Scan(&attempts)
 	if err != nil {
 		return 1, false
@@ -125,7 +125,7 @@ func (sl *StrictDailyLimiter) RecordSuccess(phone string) {
 // 🩺 डिस्ट्रीब्यूटेड बीमारी फ्रॉड ट्रैकर (Shared DB State)
 type SicknessAuditTracker struct {
 	db             *sql.DB
-	pendingPinAuth sync.Map // इन-फ्लाइट मेमोरी सेशन
+	pendingPinAuth sync.Map
 }
 
 func NewSicknessAuditTracker(db *sql.DB) *SicknessAuditTracker {
@@ -156,7 +156,7 @@ func (st *SicknessAuditTracker) RegisterSickDay(phone string) (int, bool) {
 		SET consecutive_missed_days = consecutive_missed_days + 1
 		WHERE phone = $1
 		RETURNING consecutive_missed_days`
-	
+
 	err := st.db.QueryRow(query, cleanPhone).Scan(&missedDays)
 	if err != nil {
 		return 1, false
@@ -219,7 +219,6 @@ func SendWhatsAppMessage(to, message string, isTemplate bool, templateName, lang
 		var payload map[string]interface{}
 
 		if isTemplate {
-			// 24-घंटे की कस्टमर-केयर विंडो समाप्त होने पर आवश्यक स्वीकृत टेम्प्लेट
 			payload = map[string]interface{}{
 				"messaging_product": "whatsapp",
 				"to":                formattedPhone,
@@ -240,7 +239,6 @@ func SendWhatsAppMessage(to, message string, isTemplate bool, templateName, lang
 				},
 			}
 		} else {
-			// सामान्य सक्रिय 24-घंटे सेशन टेक्स्ट मैसेज
 			payload = map[string]interface{}{
 				"messaging_product": "whatsapp",
 				"to":                formattedPhone,
@@ -410,7 +408,7 @@ func processIncomingMessage(from, body string) {
 		}
 	}
 
-	// 2. प्रगति रिपोर्ट (स्वतंत्र प्रेषक + टेम्प्लेट सपोर्ट)
+	// 2. प्रगति रिपोर्ट
 	if (upperBody == "REPORT" || upperBody == "प्रगति") && weeklyReportEngine != nil {
 		reportText := weeklyReportEngine.GenerateSummary(cleanFrom)
 		SendWhatsAppMessage(cleanFrom, reportText, false, "", "")
@@ -476,7 +474,7 @@ func processIncomingMessage(from, body string) {
 		return
 	}
 
-	// 5. ऑनबोर्डिंग व दैनिक 15-मिनट अभ्यास प्रवाह
+	// 5. ऑनबोर्डिंग व दैनिक अभ्यास प्रवाह
 	reply := fullOnboardingEngine.ProcessMessage(cleanFrom, cleanBody)
 	if reply != "" {
 		SendWhatsAppMessage(cleanFrom, reply, false, "", "")
@@ -585,4 +583,9 @@ func renderCertificateHTML(p *parental.CompleteParentProfile) string {
 type CoreEngineRegistry struct {
 	DemoSvc          *pricing.DemoService
 	PlanSvc          *pricing.PlanService
-	LoyaltySvc       *0
+	LoyaltySvc       *pricing.LoyaltyService
+	AprilSvc         *vacation.AprilSessionService
+	WinterSvc        *vacation.WinterBootcampService
+	BridgeSvc        *vacation.FoundationBridgeService
+	HolidayExamSvc   *holiday.ExamSchedulerService
+	Interes
