@@ -550,4 +550,223 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]string{"status": "SUCCESS", "message": "सिस्टम अनलॉक हुआ"})
 	})
 
-	mux.HandleFunc("/api/v1/
+	mux.HandleFunc("/api/v1/mux.HandleFunc("/api/v1/parent/issue-bypass", func(w http.ResponseWriter, r *http.Request) {
+		phone := r.URL.Query().Get("phone")
+		code, err := pinMgr.IssueOneTimeBypass(phone)
+		w.Header().Set("Content-Type", "application/json")
+		if err != nil {
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode(map[string]string{"status": "QUOTA_EXCEEDED", "message": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":      "SUCCESS",
+			"bypass_code": code,
+			"validity":    "15 Minutes",
+		})
+	})
+
+	// WhatsApp गेटवे रूट्स
+	mux.HandleFunc("/webhook", handleIncomingCommunication)
+	mux.HandleFunc("/incoming", handleIncomingCommunication)
+
+	// डिजिटल मेरिट सर्टिफिकेट रूट
+	mux.HandleFunc("/cert/", func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(r.URL.Path, "/")
+		if len(parts) < 3 {
+			http.NotFound(w, r)
+			return
+		}
+		demoID := parts[2]
+		profile := fullOnboardingEngine.GetProfileByDemoID(demoID)
+		if profile == nil {
+			http.Error(w, "सर्टिफिकेट नहीं मिला या डेमो आईडी अमान्य है।", http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		html := renderCertificateHTML(profile)
+		w.Write([]byte(html))
+	})
+
+	mux.HandleFunc("/cluster/dispatch", hub.ClusterMesh.RouteSmartTraffic)
+
+	mux.HandleFunc("/api/v1/parent/onboarding", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "SUCCESS",
+			"steps":  parental.GetParentWalkthrough(),
+		})
+	})
+
+	mux.HandleFunc("/api/v1/billing/calculate", func(w http.ResponseWriter, r *http.Request) {
+		tier := r.URL.Query().Get("tier")
+		hasExam := r.URL.Query().Get("exam_addon") == "true"
+
+		bill, err := newpricing.ComputeModularBill(tier, hasExam, 0, false)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(bill)
+	})
+
+	mux.HandleFunc("/api/v1/payment/setup-autopay", func(w http.ResponseWriter, r *http.Request) {
+		parentID := r.URL.Query().Get("parent_id")
+		tier := r.URL.Query().Get("tier")
+		hasExam := r.URL.Query().Get("exam_addon") == "true"
+
+		bill, err := newpricing.ComputeModularBill(tier, hasExam, 0, false)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		sub := hub.AutoPayEngine.SetupMandate(parentID, float64(bill.FinalPayable))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":          "MANDATE_INITIATED",
+			"monthly_amount":  bill.FinalPayable,
+			"allowed_kids":    bill.AllowedKids,
+			"subscription_id": sub.SubscriptionID,
+			"message":         "UPI ऑटो-पे मैंडेट अधिकृत करें (नो-डिफ़ॉल्ट पॉलिसी)",
+		})
+	})
+
+	mux.HandleFunc("/api/v1/payment/autopay-webhook", func(w http.ResponseWriter, r *http.Request) {
+		parentID := r.URL.Query().Get("parent_id")
+		bankUTR := r.URL.Query().Get("bank_utr")
+		success := r.URL.Query().Get("status") == "SUCCESS"
+
+		err := hub.AutoPayEngine.HandleAutoDebitWebhook(parentID, bankUTR, success)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusPaymentRequired)
+			return
+		}
+
+		hub.Brain.ProcessFeedbackAndFinance("PAYMENT_SETTLED", bankUTR)
+		w.Write([]byte(`{"status":"SETTLEMENT_CONFIRMED_AND_UNLOCKED"}`))
+	})
+
+	mux.HandleFunc("/api/v1/cbt/submit", func(w http.ResponseWriter, r *http.Request) {
+		var sub exam.CBTSessionSubmission
+		if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
+			http.Error(w, "अमान्य CBT डेटा", http.StatusBadRequest)
+			return
+		}
+
+		mockKey := map[string]string{"q1": "A", "q2": "B", "q3": "C", "q4": "D"}
+		res := exam.EvaluateCBTSession(sub, mockKey)
+
+		hub.Brain.IngestEvent(learning.SystemEvent{
+			EventType: "EXAM_SUBMIT",
+			TrackCode: sub.TrackCode,
+			Score:     res.Score,
+			Timestamp: time.Now(),
+		})
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(res)
+	})
+
+	mux.HandleFunc("/api/v1/ping", func(w http.ResponseWriter, r *http.Request) {
+		sID := r.URL.Query().Get("student_id")
+		if sID == "" {
+			http.Error(w, "student_id आवश्यक", http.StatusBadRequest)
+			return
+		}
+		hub.Aggregator.QueuePing(scale.PingPayload{
+			StudentID: sID,
+			ActiveSec: 30,
+			Timestamp: time.Now().Unix(),
+		})
+		w.Write([]byte(`{"status":"ACK"}`))
+	})
+
+	mux.HandleFunc("/api/v1/whatsapp/webhook", func(w http.ResponseWriter, r *http.Request) {
+		phone := r.URL.Query().Get("phone")
+		msg := r.URL.Query().Get("message")
+		reply, handled := hub.ParentFeedback.ProcessFeedbackAndHeal(phone, msg)
+		if !handled {
+			reply = "नमस्ते! 'अनंत अभ्यास' में आपका स्वागत है। अभ्यास शुरू करने के लिए START लिखें।"
+		}
+		w.Write([]byte(reply))
+	})
+
+	mux.HandleFunc("/api/v1/app/support-hook", func(w http.ResponseWriter, r *http.Request) {
+		parentID := r.URL.Query().Get("parent_id")
+		rawError := r.URL.Query().Get("error_log")
+
+		ticket := hub.AppSupport.IngestAndAutoResolve("IN_APP_CRASH_HOOK", parentID, rawError)
+		hub.Brain.ProcessFeedbackAndFinance(string(ticket.Type), rawError)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ticket)
+	})
+
+	mux.HandleFunc("/api/v1/admin/stats", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"system":        "Anant Abhyas Ultra Core",
+			"cluster_state": "ACTIVE",
+			"auto_pay":      "ENFORCED_MANDATE_ONLY",
+			"active_tracks": []string{"NAVODAYA", "SAINIK_SCHOOL", "NDA", "IIT_JEE"},
+			"anti_sharing":  hub.CoreEngines.AntiSharing != nil,
+			"biometric_dna": hub.CoreEngines.BioDNA != nil,
+		})
+	})
+
+	sandboxCore := sandbox.NewAutonomousSandboxCore(adminNumber, db, func(from, body string) string {
+		if wellnessEngine != nil && wellnessEngine.DetectSicknessFromMessage(body) {
+			return wellnessEngine.MarkStudentSick(from, "सैंडबॉक्स छात्र", "दैनिक अभ्यास")
+		}
+		return fullOnboardingEngine.ProcessMessage(from, body)
+	})
+
+	mux.HandleFunc("/sandbox", sandboxCore.RenderSandboxUI)
+	mux.HandleFunc("/api/v1/sandbox/simulate", sandboxCore.HandleSimulation)
+	mux.HandleFunc("/api/v1/sandbox/toggle", sandboxCore.ToggleSimulationStates)
+	mux.HandleFunc("/api/v1/sandbox/audit", sandboxCore.ServeAuditReport)
+
+	server := &http.Server{
+		Addr:         ":" + port,
+		Handler:      mux,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		log.Printf("🚀 अनंत अभ्यास क्लस्टर पोर्ट :%s पर पूर्णतः सक्रिय है...", port)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("सर्वर क्रैश त्रुटि: %v", err)
+		}
+	}()
+
+	// ग्रेसफुल शटडाउन और सिंक्रोनाइज़ेशन
+	<-stop
+	log.Println("🛑 शटडाउन सिग्नल प्राप्त हुआ। सक्रिय ऑपरेशन्स सुरक्षित रूप से बंद किए जा रहे हैं...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// 1. नए HTTP अनुरोध बंद करना
+	if err := server.Shutdown(ctx); err != nil {
+		log.Printf("⚠️ सर्वर शटडाउन त्रुटि: %v", err)
+	}
+
+	// 2. इनबाउंड कतार बंद करना और वर्कर्स के खत्म होने की प्रतीक्षा (sync.WaitGroup)
+	close(webhookQueue)
+	log.Println("⏳ कतार में शेष मैसेजेस के निष्पादन की प्रतीक्षा...")
+	workerWG.Wait()
+
+	// 3. डेटाबेस कनेक्शन सुरक्षित रूप से बंद करना
+	poolCancel()
+	if db != nil {
+		_ = db.Close()
+	}
+	log.Println("✅ सभी जॉब्स पूरे हुए। डेटाबेस कनेक्शन सुरक्षित रूप से बंद कर दिया गया है।")
+}
