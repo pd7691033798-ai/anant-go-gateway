@@ -53,7 +53,7 @@ func (s *FamilyGuardianService) AddChildWithLock(ctx context.Context, parentUID,
 	}
 
 	// यूज़र का वर्तमान प्लान निकालें (Family या Family Unlimited)
-	limits, err := s.planService.GetUserPlanLimits(ctx, parentUID)
+	limits, err := s.planService.GetUserPlanLimits(parentUID)
 	if err != nil {
 		return nil, fmt.Errorf("प्लान लिमिट चेक करने में त्रुटि: %w", err)
 	}
