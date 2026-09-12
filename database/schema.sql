@@ -1,4 +1,4 @@
--- 1. Users Table (Core Student & Account Profile + PIN Security)
+-- 1. Users Table (Core Student & Account Profile + PIN Security + UPI Grace Period)
 CREATE TABLE IF NOT EXISTS users (
     phone VARCHAR(15) PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
@@ -27,7 +27,11 @@ CREATE TABLE IF NOT EXISTS users (
     failed_attempts INT DEFAULT 0,
     last_failed_at TIMESTAMP WITH TIME ZONE,
     daily_bypass_count INT DEFAULT 0,
-    bypass_reset_at TIMESTAMP WITH TIME ZONE
+    bypass_reset_at TIMESTAMP WITH TIME ZONE,
+
+    -- 💳 UPI ऑटो-पे 48-घंटे ग्रेस पीरियड व मैंडेट ट्रैकिंग
+    payment_grace_until TIMESTAMP WITH TIME ZONE,
+    last_mandate_status VARCHAR(30) DEFAULT 'ACTIVE'
 );
 
 -- 2. State Academic Calendars
@@ -133,3 +137,6 @@ CREATE INDEX IF NOT EXISTS idx_parent_primary_phone ON parent_accounts(primary_p
 CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
 CREATE INDEX IF NOT EXISTS idx_submission_logs_phone ON submission_logs(student_phone);
 CREATE INDEX IF NOT EXISTS idx_security_audit_phone ON security_audit_logs(parent_phone);
+
+-- DPDPA 2023 30-दिवसीय बाल डेटा पर्जिंग हेतु इंडेक्स (Fast Purge Queries)
+CREATE INDEX IF NOT EXISTS idx_submission_logs_retention ON submission_logs(submitted_at);
