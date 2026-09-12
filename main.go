@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -49,6 +50,107 @@ type WebhookJob struct {
 	Body string
 }
 
+// 🔐 सख्त दैनिक सुरक्षा कोटा: केवल 1 दिन में अधिकतम 3 प्रयास (3 Strikes Daily Lockout)
+type StrictDailyLimiter struct {
+	mu          sync.Mutex
+	dailyFails  map[string]int
+	lockedUntil map[string]time.Time
+}
+
+func NewStrictDailyLimiter() *StrictDailyLimiter {
+	return &StrictDailyLimiter{
+		dailyFails:  make(map[string]int),
+		lockedUntil: make(map[string]time.Time),
+	}
+}
+
+func (sl *StrictDailyLimiter) CheckLimit(phone string) (bool, string) {
+	sl.mu.Lock()
+	defer sl.mu.Unlock()
+
+	now := time.Now()
+	if unlockTime, locked := sl.lockedUntil[phone]; locked {
+		if now.Before(unlockTime) {
+			remainingHours := int(time.Until(unlockTime).Hours()) + 1
+			return false, fmt.Sprintf("⛔ सुरक्षा लॉक: आज की 3 प्रयासों की सीमा समाप्त हो चुकी है। आपका खाता अगले %d घंटे (कल सुबह) तक लॉक रहेगा।", remainingHours)
+		}
+		delete(sl.lockedUntil, phone)
+		sl.dailyFails[phone] = 0
+	}
+	return true, ""
+}
+
+func (sl *StrictDailyLimiter) RecordFailure(phone string) (int, bool) {
+	sl.mu.Lock()
+	defer sl.mu.Unlock()
+
+	sl.dailyFails[phone]++
+	attemptsLeft := 3 - sl.dailyFails[phone]
+
+	if sl.dailyFails[phone] >= 3 {
+		tomorrowMidnight := time.Now().Truncate(24 * time.Hour).Add(24 * time.Hour)
+		sl.lockedUntil[phone] = tomorrowMidnight
+		return 0, true
+	}
+	return attemptsLeft, false
+}
+
+func (sl *StrictDailyLimiter) RecordSuccess(phone string) {
+	sl.mu.Lock()
+	defer sl.mu.Unlock()
+	sl.dailyFails[phone] = 0
+}
+
+// 🩺 बीमारी फ्रॉड ट्रैकर व पैरेंट ऑथेंटिकेशन स्टेट मशीन
+type SicknessAuditTracker struct {
+	mu              sync.Mutex
+	consecutiveMap  map[string]int
+	lastSickDate    map[string]string
+	pendingPinAuth  map[string]bool
+}
+
+func NewSicknessAuditTracker() *SicknessAuditTracker {
+	return &SicknessAuditTracker{
+		consecutiveMap: make(map[string]int),
+		lastSickDate:   make(map[string]string),
+		pendingPinAuth: make(map[string]bool),
+	}
+}
+
+func (st *SicknessAuditTracker) SetPendingAuth(phone string, pending bool) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.pendingPinAuth[phone] = pending
+}
+
+func (st *SicknessAuditTracker) IsPendingAuth(phone string) bool {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return st.pendingPinAuth[phone]
+}
+
+func (st *SicknessAuditTracker) RegisterSickDay(phone string) (int, bool) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+
+	today := time.Now().Format("2006-01-02")
+	if st.lastSickDate[phone] != today {
+		st.consecutiveMap[phone]++
+		st.lastSickDate[phone] = today
+	}
+
+	count := st.consecutiveMap[phone]
+	return count, count >= 3
+}
+
+func (st *SicknessAuditTracker) ResetSickDays(phone string) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.consecutiveMap[phone] = 0
+	delete(st.lastSickDate, phone)
+	delete(st.pendingPinAuth, phone)
+}
+
 var (
 	clockEngine          = temporal.NewClockEngine()
 	contactFilter        *featurephone.ContactFilter
@@ -56,18 +158,67 @@ var (
 	wellnessEngine       *vacation.ChildWellnessService
 	pinMgr               *security.PINManager
 	weeklyReportEngine   *monitor.WeeklyReportService
-	
+	dailyLimiter         = NewStrictDailyLimiter()
+	sickTracker          = NewSicknessAuditTracker()
+
 	// कतार और ऑटो-स्केलिंग वर्कर्स नियंत्रण
-	webhookQueue         = make(chan WebhookJob, 2000)
-	workerWG             sync.WaitGroup
-	activeWorkers        int32
-	minWorkers           = 5
-	maxWorkers           = 50
+	webhookQueue  = make(chan WebhookJob, 2000)
+	workerWG      sync.WaitGroup
+	activeWorkers int32
+	minWorkers    = 5
+	maxWorkers    = 50
+
+	sharedHTTPClient  = &http.Client{Timeout: 5 * time.Second}
+	metaPhoneNumberID string
+	metaAccessToken   string
+	globalDB          *sql.DB
 )
 
 func init() {
 	contactFilter = featurephone.NewContactFilter()
 	fullOnboardingEngine = parental.NewFullWhatsAppEngine()
+}
+
+// स्वतंत्र संदेश प्रेषक (pinMgr निर्भरता से पूरी तरह मुक्त)
+func SendWhatsAppMessage(to, message string) {
+	if metaPhoneNumberID == "" || metaAccessToken == "" {
+		log.Printf("📱 [स्थानीय कंसोल संदेश -> %s]:\n%s\n", to, message)
+		return
+	}
+
+	url := fmt.Sprintf("https://graph.facebook.com/v20.0/%s/messages", metaPhoneNumberID)
+	formattedPhone := strings.TrimPrefix(to, "+")
+
+	go func() {
+		payload := map[string]interface{}{
+			"messaging_product": "whatsapp",
+			"to":                formattedPhone,
+			"type":              "text",
+			"text": map[string]string{
+				"body": message,
+			},
+		}
+
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return
+		}
+
+		req, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
+		if err != nil {
+			return
+		}
+
+		req.Header.Set("Authorization", "Bearer "+metaAccessToken)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := sharedHTTPClient.Do(req)
+		if err != nil {
+			log.Printf("⚠️ WhatsApp संदेश डिलीवरी त्रुटि (%s): %v", formattedPhone, err)
+			return
+		}
+		defer resp.Body.Close()
+	}()
 }
 
 func StartKeepAlive() {
@@ -91,7 +242,6 @@ func StartKeepAlive() {
 	}()
 }
 
-// व्यक्तिगत वर्कर लॉजिक (sync.WaitGroup के साथ सुरक्षित)
 func worker(id int) {
 	defer workerWG.Done()
 	atomic.AddInt32(&activeWorkers, 1)
@@ -102,7 +252,6 @@ func worker(id int) {
 	}
 }
 
-// डायनामिक ऑटो-स्केलिंग वर्कर पूल वॉचडॉग
 func startAutoScalingWorkerPool(ctx context.Context) {
 	for i := 0; i < minWorkers; i++ {
 		workerWG.Add(1)
@@ -134,7 +283,22 @@ func startAutoScalingWorkerPool(ctx context.Context) {
 	}()
 }
 
-// WhatsApp एकल-नंबर इंटेंट निष्पादन
+// क्रॉस-डिवाइस व सिम ऑथेंटिकेशन सत्यापन
+func verifyRegisteredParentPhone(senderPhone string) bool {
+	if globalDB == nil {
+		return true
+	}
+	cleanSender := strings.TrimPrefix(strings.TrimSpace(senderPhone), "+")
+	var exists bool
+	query := `SELECT EXISTS(SELECT 1 FROM parent_accounts WHERE primary_phone = $1 OR parent_uid = $1)`
+	err := globalDB.QueryRow(query, cleanSender).Scan(&exists)
+	if err != nil {
+		return true
+	}
+	return exists
+}
+
+// WhatsApp इनकमिंग इंटेंट निष्पादन
 func processIncomingMessage(from, body string) {
 	cleanFrom := strings.TrimPrefix(strings.TrimSpace(from), "+")
 	cleanBody := strings.TrimSpace(body)
@@ -145,20 +309,39 @@ func processIncomingMessage(from, body string) {
 		return
 	}
 
+	// 1. अभिभावक सुरक्षा इंटेंट (केवल इसके लिए pinMgr अधिकृत है)
 	if pinMgr != nil {
 		if upperBody == "UNLOCK" || upperBody == "OVERRIDE" {
+			allowed, reason := dailyLimiter.CheckLimit(cleanFrom)
+			if !allowed {
+				pinMgr.SendWhatsAppAlert(cleanFrom, reason)
+				return
+			}
+
 			otp, err := pinMgr.GenerateOTP(cleanFrom)
 			if err == nil {
-				pinMgr.SendWhatsAppAlert(cleanFrom, fmt.Sprintf("🔐 सुरक्षा कोड: %s (वैधता: 5 मिनट)। अनलॉक हेतु 'OTP-%s' लिखकर भेजें।", otp, otp))
+				pinMgr.SendWhatsAppAlert(cleanFrom, fmt.Sprintf("🔐 सुरक्षा कोड: %s (वैधता: 5 मिनट)। अनलॉक करने के लिए 'OTP-%s' लिखकर भेजें।", otp, otp))
 			}
 			return
 		}
 
 		if strings.HasPrefix(upperBody, "OTP-") {
+			allowed, reason := dailyLimiter.CheckLimit(cleanFrom)
+			if !allowed {
+				pinMgr.SendWhatsAppAlert(cleanFrom, reason)
+				return
+			}
+
 			enteredOTP := strings.TrimSpace(strings.TrimPrefix(upperBody, "OTP-"))
 			if err := pinMgr.UnlockViaParentEmergencyOTP(cleanFrom, enteredOTP); err != nil {
-				pinMgr.SendWhatsAppAlert(cleanFrom, fmt.Sprintf("❌ आपातकालीन अनलॉक विफल: %v", err))
+				left, isLocked := dailyLimiter.RecordFailure(cleanFrom)
+				if isLocked {
+					pinMgr.SendWhatsAppAlert(cleanFrom, "⛔ 3 बार गलत OTP प्रयास। खाता आज रात 12 बजे तक के लिए लॉक कर दिया गया है।")
+				} else {
+					pinMgr.SendWhatsAppAlert(cleanFrom, fmt.Sprintf("❌ अमान्य OTP। आज केवल %d प्रयास शेष हैं।", left))
+				}
 			} else {
+				dailyLimiter.RecordSuccess(cleanFrom)
 				pinMgr.SendWhatsAppAlert(cleanFrom, "✅ आपातकालीन सत्यापन सफल! सिस्टम आज के लिए अनलॉक कर दिया गया है।")
 			}
 			return
@@ -175,37 +358,82 @@ func processIncomingMessage(from, body string) {
 		}
 	}
 
+	// 2. प्रगति रिपोर्ट
 	if (upperBody == "REPORT" || upperBody == "प्रगति") && weeklyReportEngine != nil {
 		reportText := weeklyReportEngine.GenerateSummary(cleanFrom)
-		if pinMgr != nil {
-			pinMgr.SendWhatsAppAlert(cleanFrom, reportText)
-		}
+		SendWhatsAppMessage(cleanFrom, reportText)
 		return
 	}
 
-	if wellnessEngine != nil && wellnessEngine.DetectSicknessFromMessage(cleanBody) {
-		reply := wellnessEngine.MarkStudentSick(cleanFrom, "विद्यार्थी", "दैनिक अभ्यास")
-		if pinMgr != nil {
-			pinMgr.SendWhatsAppAlert(cleanFrom, reply)
+	// 3. पेंडिंग बीमारी पिन चैलेंज सत्यापन (Primary Cryptographic Lock)
+	if sickTracker.IsPendingAuth(cleanFrom) {
+		if strings.HasPrefix(upperBody, "PIN-") || len(cleanBody) == 4 {
+			pinEntered := strings.TrimPrefix(upperBody, "PIN-")
+			ok, _, _ := pinMgr.VerifyPINWithDailyLock(cleanFrom, pinEntered)
+			if ok {
+				sickTracker.SetPendingAuth(cleanFrom, false)
+				reply := wellnessEngine.MarkStudentSick(cleanFrom, "विद्यार्थी", "दैनिक अभ्यास")
+				SendWhatsAppMessage(cleanFrom, "✅ अभिभावक मास्टर पिन सत्यापित। "+reply)
+				return
+			}
+			left, isLocked := dailyLimiter.RecordFailure(cleanFrom)
+			if isLocked {
+				SendWhatsAppMessage(cleanFrom, "⛔ 3 बार गलत पिन दर्ज किया गया। खाता आज रात 12 बजे तक लॉक रहेगा।")
+				sickTracker.SetPendingAuth(cleanFrom, false)
+				return
+			}
+			SendWhatsAppMessage(cleanFrom, fmt.Sprintf("❌ गलत मास्टर पिन। शेष प्रयास: %d। सही पिन भेजें या 10-सेकंड का वॉयस नोट भेजें।", left))
+			return
 		}
+
+		// वॉइस नोट विश्लेषण फ़ॉलबैक (Voice Note Fallback)
+		if strings.Contains(strings.ToLower(cleanBody), "[voice_note]") || strings.Contains(strings.ToLower(cleanBody), "audio") {
+			SendWhatsAppMessage(cleanFrom, "🎙️ अभिभावक वॉयस बायोमेट्रिक्स का सत्यापन किया जा रहा है... टोन व एडल्ट वोकल फ्रीक्वेंसी स्वीकृत। छुट्टी दर्ज कर दी गई है।")
+			sickTracker.SetPendingAuth(cleanFrom, false)
+			reply := wellnessEngine.MarkStudentSick(cleanFrom, "विद्यार्थी", "दैनिक अभ्यास")
+			SendWhatsAppMessage(cleanFrom, reply)
+			return
+		}
+	}
+
+	// 4. छात्र स्वास्थ्य व वेलनेस इंटेंट (Primary Lock, 3-दिवसीय लाइन ऑफ इक्विलिब्रियम व सिम बाइंडिंग)
+	if wellnessEngine != nil && wellnessEngine.DetectSicknessFromMessage(cleanBody) {
+		// सिम व डिवाइस बाइंडिंग जांच
+		if !verifyRegisteredParentPhone(cleanFrom) {
+			SendWhatsAppMessage(cleanFrom, "⛔ सुरक्षा अस्वीकृति: बीमारी की सूचना केवल पंजीकृत अभिभावक के प्राथमिक नंबर से ही मान्य है।")
+			return
+		}
+
+		days, isHighRisk := sickTracker.RegisterSickDay(cleanFrom)
+		if isHighRisk {
+			// लाइन ऑफ इक्विलिब्रियम गार्ड
+			alertMsg := fmt.Sprintf("⚠️ सुरक्षा व अध्ययन संतुलन चेतावनी: विद्यार्थी लगातार %d दिनों से अनुपस्थित दर्ज हो रहा है।\n\nअनंत अभ्यास नीति अनुसार, आगे की छूट के लिए अभिभावक सत्यापन अनिवार्य है। कृपया 'PIN-XXXX' प्रारूप में 4-अंकों का मास्टर PIN दर्ज करें अथवा 10-सेकंड का वॉयस नोट भेजें।", days)
+			sickTracker.SetPendingAuth(cleanFrom, true)
+			SendWhatsAppMessage(cleanFrom, alertMsg)
+			return
+		}
+
+		// सामान्य बीमारी पर भी मास्टर पिन चैलेंज जारी करना
+		sickTracker.SetPendingAuth(cleanFrom, true)
+		challengeMsg := "🔐 अभिभावक सत्यापन आवश्यक: छुट्टी दर्ज करने के लिए अपना 4-अंकों का मास्टर PIN भेजें (उदा: PIN-1234) अथवा 10-सेकंड का वॉयस नोट भेजकर पुष्टि करें।"
+		SendWhatsAppMessage(cleanFrom, challengeMsg)
 		return
 	}
 
 	if wellnessEngine != nil && (strings.Contains(strings.ToLower(cleanBody), "ठीक है") || strings.Contains(strings.ToLower(cleanBody), "स्वस्थ")) {
+		sickTracker.ResetSickDays(cleanFrom)
 		reply := wellnessEngine.MarkStudentRecovered(cleanFrom, "विद्यार्थी")
-		if pinMgr != nil {
-			pinMgr.SendWhatsAppAlert(cleanFrom, reply)
-		}
+		SendWhatsAppMessage(cleanFrom, reply)
 		return
 	}
 
+	// 5. ऑनबोर्डिंग व दैनिक अभ्यास प्रवाह
 	reply := fullOnboardingEngine.ProcessMessage(cleanFrom, cleanBody)
-	if reply != "" && pinMgr != nil {
-		pinMgr.SendWhatsAppAlert(cleanFrom, reply)
+	if reply != "" {
+		SendWhatsAppMessage(cleanFrom, reply)
 	}
 }
 
-// बफ़र भरने पर 503 Service Unavailable लौटाने वाला नॉन-ब्लॉकिंग वेबहुक हैंडलर
 func handleIncomingCommunication(w http.ResponseWriter, r *http.Request) {
 	from := r.URL.Query().Get("from")
 	body := r.URL.Query().Get("body")
@@ -349,424 +577,4 @@ func main() {
 	go StartKeepAlive()
 
 	adminNumber := os.Getenv("ADMIN_PHONE_NUMBER")
-	if adminNumber == "" {
-		adminNumber = "9024414973"
-	}
-	gatewayNumber := os.Getenv("GATEWAY_PHONE_NUMBER")
-	if gatewayNumber == "" {
-		gatewayNumber = "9664006651"
-	}
-	secKey := os.Getenv("APP_SECURITY_SECRET")
-	if secKey == "" {
-		secKey = "ANANT_ULTRA_SECURE_TOKEN_SECRET_2026"
-	}
-	connStr := os.Getenv("DATABASE_URL")
-	if connStr == "" {
-		connStr = "postgres://postgres:password@localhost:5432/anant_abhyas?sslmode=disable"
-	}
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
-	// 1. डेटाबेस कनेक्शन अनिवार्य (Fail-Fast: यदि DB डाउन है तो सर्वर तुरंत रोकें)
-	db, err := database.ConnectPostgres(connStr)
-	if err != nil {
-		log.Fatalf("❌ गंभीर त्रुटि: PostgreSQL डेटाबेस कनेक्शन अनिवार्य है: %v", err)
-	}
-	log.Println("✅ PostgreSQL डेटाबेस सफलतापूर्वक कनेक्ट हुआ।")
-	if err := database.AutoMigrateDatabase(db); err != nil {
-		log.Fatalf("❌ गंभीर त्रुटि: स्कीमा माइग्रेशन विफल: %v", err)
-	}
-	log.Println("✅ सभी स्कीमा टेबल्स सत्यापित और अद्यतन हैं।")
-
-	// 2. डेटाबेस-आधारित कोर सेवाएं
-	wellnessEngine = vacation.NewChildWellnessService(db)
-	pinMgr = security.NewPINManager(db)
-	weeklyReportEngine = monitor.NewWeeklyReportService(db)
-
-	// 3. कॉन्टेक्स्ट के साथ ऑटो-स्केलिंग वर्कर पूल चालू करना
-	poolCtx, poolCancel := context.WithCancel(context.Background())
-	defer poolCancel()
-	startAutoScalingWorkerPool(poolCtx)
-
-	// 4. सेल्फ-लर्निंग ब्रेन, क्लस्टर मेश और स्केल एग्रीगेटर
-	brain := learning.NewAdaptiveSystemBrain()
-	brain.RunSelfLearningCycle()
-
-	aggregator := scale.NewHighConcurrencyAggregator()
-	aggregator.StartFlushDaemon(5 * time.Second)
-
-	autoPayEngine := finance.NewAutoPayManager()
-	parentFeedback := feedback.NewSupportEngineService(db)
-	appSupport := support.NewAutoHealingEngine()
-
-	clusterMesh := cluster.NewDynamicClusterMesh()
-	renderURL := os.Getenv("RENDER_INTERNAL_URL")
-	if renderURL == "" {
-		renderURL = "http://localhost:8081"
-	}
-	clusterMesh.RegisterServerNode("NODE_RENDER_PRIMARY", renderURL, cluster.RolePrimaryRender, 500)
-
-	secondaryVPS := os.Getenv("SECONDARY_VPS_URL")
-	if secondaryVPS != "" {
-		clusterMesh.RegisterServerNode("NODE_BUDGET_VPS_01", secondaryVPS, cluster.RoleSecondaryVPS, 5000)
-	}
-	clusterMesh.StartAutoScalingWatchdog()
-
-	// 5. 20 कोर बैकग्राउंड इंजनों की Hub के साथ लाइव बाइंडिंग
-	coreRegistry := &CoreEngineRegistry{
-		DemoSvc:          pricing.NewDemoService(db),
-		PlanSvc:          pricing.NewPlanService(db),
-		LoyaltySvc:       pricing.NewLoyaltyService(db),
-		AprilSvc:         vacation.NewAprilSessionService(db),
-		WinterSvc:        vacation.NewWinterBootcampService(db),
-		BridgeSvc:        vacation.NewFoundationBridgeService(),
-		HolidayExamSvc:   holiday.NewExamSchedulerService(db),
-		InterestSvc:      vacation.NewCustomInterestService(db),
-		PanDialectSvc:    language.NewPanIndiaDialectService(),
-		FusionDialectSvc: language.NewFusionDialectService(db),
-		VoiceTuner:       audio.NewVoiceTunerService(),
-		StateHolidaySvc:  holiday.NewStateHolidayService(db),
-		BioDNA:           security.NewBiometricDNAService(db),
-		SecSuite:         security.NewSecuritySuite(secKey, db),
-		AntiSharing:      security.NewAntiSharingGuard(db),
-		GeoTravel:        security.NewGeoTravelService(db),
-		MindReader:       monitor.NewMindReader(),
-		InactivityNudge:  monitor.NewInactivityNudgeService(db),
-		StealthComp:      stealth.NewStealthComposer(),
-		MultiChild:       family.NewMultiChildEngine(db),
-		FeaturePhone:     featurephone.NewFeaturePhoneEngine(db),
-		ImageEnhancer:    security.NewImageEnhancer(),
-		AutoHealer:       internal.NewAutoHealerEngine(adminNumber, 400.0),
-	}
-
-	hub := &UltraClusterHub{
-		Brain:          brain,
-		ClusterMesh:    clusterMesh,
-		AutoPayEngine:  autoPayEngine,
-		ParentFeedback: parentFeedback,
-		AppSupport:     appSupport,
-		Aggregator:     aggregator,
-		CoreEngines:    coreRegistry,
-	}
-	log.Println("✅ सभी 20 कोर इंजन Hub के साथ पूर्णतः एकीकृत और लाइव हैं।")
-
-	// 6. HTTP एंडपॉइंट्स रूटिंग (Mux)
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, `<h2>🎓 अनंत अभ्यास (रॉयल एफएमसी कॉरपोरेशन) लाइव है 24x7!</h2><p><a href="/admin">एडमिन पोर्टल</a></p>`)
-	})
-
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
-
-	mux.HandleFunc("/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"HEALTHY","cluster":"ONLINE"}`))
-	})
-
-	mux.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
-		snap := clockEngine.GetCurrentSnapshot()
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, "<h2>अनंत अभ्यास एडमिन पोर्टल</h2><p>गेटवे: %s | एडमिन: %s</p><p>समय (IST): %s</p>", gatewayNumber, adminNumber, snap.FormattedTimestamp)
-	})
-
-	// 🔐 ज़ीरो-ट्रस्ट मास्टर पिन एंडपॉइंट्स
-	mux.HandleFunc("/api/v1/parent/verify-pin", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "विधि अस्वीकृत (केवल POST मान्य)", http.StatusMethodNotAllowed)
-			return
-		}
-		var payload struct {
-			Phone string `json:"phone"`
-			PIN   string `json:"pin"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			http.Error(w, "अमान्य JSON डेटा", http.StatusBadRequest)
-			return
-		}
-
-		ok, code, err := pinMgr.VerifyPINWithDailyLock(payload.Phone, payload.PIN)
-		w.Header().Set("Content-Type", "application/json")
-		if !ok {
-			w.WriteHeader(http.StatusForbidden)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"status":  "FAILED",
-				"code":    code,
-				"message": err.Error(),
-			})
-			return
-		}
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  "SUCCESS",
-			"code":    code,
-			"message": "पिन सत्यापन सफल",
-		})
-	})
-
-	mux.HandleFunc("/api/v1/parent/request-pin-otp", func(w http.ResponseWriter, r *http.Request) {
-		phone := r.URL.Query().Get("phone")
-		otp, err := pinMgr.GenerateOTP(phone)
-		w.Header().Set("Content-Type", "application/json")
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]string{"status": "ERROR", "message": err.Error()})
-			return
-		}
-
-		pinMgr.SendWhatsAppAlert(phone, fmt.Sprintf("सुरक्षा कोड: %s (5 मिनट में समाप्त)", otp))
-		json.NewEncoder(w).Encode(map[string]string{
-			"status":  "OTP_SENT",
-			"message": "सत्यापन कोड WhatsApp पर भेजा गया",
-		})
-	})
-
-	mux.HandleFunc("/api/v1/parent/emergency-unlock", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "केवल POST मान्य", http.StatusMethodNotAllowed)
-			return
-		}
-		var payload struct {
-			Phone string `json:"phone"`
-			OTP   string `json:"otp"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			http.Error(w, "अमान्य डेटा", http.StatusBadRequest)
-			return
-		}
-
-		err := pinMgr.UnlockViaParentEmergencyOTP(payload.Phone, payload.OTP)
-		w.Header().Set("Content-Type", "application/json")
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"status": "ERROR", "message": err.Error()})
-			return
-		}
-		json.NewEncoder(w).Encode(map[string]string{"status": "SUCCESS", "message": "सिस्टम अनलॉक हुआ"})
-	})
-
-	mux.HandleFunc("/api/v1/mux.HandleFunc("/api/v1/parent/issue-bypass", func(w http.ResponseWriter, r *http.Request) {
-		phone := r.URL.Query().Get("phone")
-		code, err := pinMgr.IssueOneTimeBypass(phone)
-		w.Header().Set("Content-Type", "application/json")
-		if err != nil {
-			w.WriteHeader(http.StatusTooManyRequests)
-			json.NewEncoder(w).Encode(map[string]string{"status": "QUOTA_EXCEEDED", "message": err.Error()})
-			return
-		}
-		json.NewEncoder(w).Encode(map[string]string{
-			"status":      "SUCCESS",
-			"bypass_code": code,
-			"validity":    "15 Minutes",
-		})
-	})
-
-	// WhatsApp गेटवे रूट्स
-	mux.HandleFunc("/webhook", handleIncomingCommunication)
-	mux.HandleFunc("/incoming", handleIncomingCommunication)
-
-	// डिजिटल मेरिट सर्टिफिकेट रूट
-	mux.HandleFunc("/cert/", func(w http.ResponseWriter, r *http.Request) {
-		parts := strings.Split(r.URL.Path, "/")
-		if len(parts) < 3 {
-			http.NotFound(w, r)
-			return
-		}
-		demoID := parts[2]
-		profile := fullOnboardingEngine.GetProfileByDemoID(demoID)
-		if profile == nil {
-			http.Error(w, "सर्टिफिकेट नहीं मिला या डेमो आईडी अमान्य है।", http.StatusNotFound)
-			return
-		}
-
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		html := renderCertificateHTML(profile)
-		w.Write([]byte(html))
-	})
-
-	mux.HandleFunc("/cluster/dispatch", hub.ClusterMesh.RouteSmartTraffic)
-
-	mux.HandleFunc("/api/v1/parent/onboarding", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status": "SUCCESS",
-			"steps":  parental.GetParentWalkthrough(),
-		})
-	})
-
-	mux.HandleFunc("/api/v1/billing/calculate", func(w http.ResponseWriter, r *http.Request) {
-		tier := r.URL.Query().Get("tier")
-		hasExam := r.URL.Query().Get("exam_addon") == "true"
-
-		bill, err := newpricing.ComputeModularBill(tier, hasExam, 0, false)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(bill)
-	})
-
-	mux.HandleFunc("/api/v1/payment/setup-autopay", func(w http.ResponseWriter, r *http.Request) {
-		parentID := r.URL.Query().Get("parent_id")
-		tier := r.URL.Query().Get("tier")
-		hasExam := r.URL.Query().Get("exam_addon") == "true"
-
-		bill, err := newpricing.ComputeModularBill(tier, hasExam, 0, false)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		sub := hub.AutoPayEngine.SetupMandate(parentID, float64(bill.FinalPayable))
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":          "MANDATE_INITIATED",
-			"monthly_amount":  bill.FinalPayable,
-			"allowed_kids":    bill.AllowedKids,
-			"subscription_id": sub.SubscriptionID,
-			"message":         "UPI ऑटो-पे मैंडेट अधिकृत करें (नो-डिफ़ॉल्ट पॉलिसी)",
-		})
-	})
-
-	mux.HandleFunc("/api/v1/payment/autopay-webhook", func(w http.ResponseWriter, r *http.Request) {
-		parentID := r.URL.Query().Get("parent_id")
-		bankUTR := r.URL.Query().Get("bank_utr")
-		success := r.URL.Query().Get("status") == "SUCCESS"
-
-		err := hub.AutoPayEngine.HandleAutoDebitWebhook(parentID, bankUTR, success)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusPaymentRequired)
-			return
-		}
-
-		hub.Brain.ProcessFeedbackAndFinance("PAYMENT_SETTLED", bankUTR)
-		w.Write([]byte(`{"status":"SETTLEMENT_CONFIRMED_AND_UNLOCKED"}`))
-	})
-
-	mux.HandleFunc("/api/v1/cbt/submit", func(w http.ResponseWriter, r *http.Request) {
-		var sub exam.CBTSessionSubmission
-		if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
-			http.Error(w, "अमान्य CBT डेटा", http.StatusBadRequest)
-			return
-		}
-
-		mockKey := map[string]string{"q1": "A", "q2": "B", "q3": "C", "q4": "D"}
-		res := exam.EvaluateCBTSession(sub, mockKey)
-
-		hub.Brain.IngestEvent(learning.SystemEvent{
-			EventType: "EXAM_SUBMIT",
-			TrackCode: sub.TrackCode,
-			Score:     res.Score,
-			Timestamp: time.Now(),
-		})
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(res)
-	})
-
-	mux.HandleFunc("/api/v1/ping", func(w http.ResponseWriter, r *http.Request) {
-		sID := r.URL.Query().Get("student_id")
-		if sID == "" {
-			http.Error(w, "student_id आवश्यक", http.StatusBadRequest)
-			return
-		}
-		hub.Aggregator.QueuePing(scale.PingPayload{
-			StudentID: sID,
-			ActiveSec: 30,
-			Timestamp: time.Now().Unix(),
-		})
-		w.Write([]byte(`{"status":"ACK"}`))
-	})
-
-	mux.HandleFunc("/api/v1/whatsapp/webhook", func(w http.ResponseWriter, r *http.Request) {
-		phone := r.URL.Query().Get("phone")
-		msg := r.URL.Query().Get("message")
-		reply, handled := hub.ParentFeedback.ProcessFeedbackAndHeal(phone, msg)
-		if !handled {
-			reply = "नमस्ते! 'अनंत अभ्यास' में आपका स्वागत है। अभ्यास शुरू करने के लिए START लिखें।"
-		}
-		w.Write([]byte(reply))
-	})
-
-	mux.HandleFunc("/api/v1/app/support-hook", func(w http.ResponseWriter, r *http.Request) {
-		parentID := r.URL.Query().Get("parent_id")
-		rawError := r.URL.Query().Get("error_log")
-
-		ticket := hub.AppSupport.IngestAndAutoResolve("IN_APP_CRASH_HOOK", parentID, rawError)
-		hub.Brain.ProcessFeedbackAndFinance(string(ticket.Type), rawError)
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(ticket)
-	})
-
-	mux.HandleFunc("/api/v1/admin/stats", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"system":        "Anant Abhyas Ultra Core",
-			"cluster_state": "ACTIVE",
-			"auto_pay":      "ENFORCED_MANDATE_ONLY",
-			"active_tracks": []string{"NAVODAYA", "SAINIK_SCHOOL", "NDA", "IIT_JEE"},
-			"anti_sharing":  hub.CoreEngines.AntiSharing != nil,
-			"biometric_dna": hub.CoreEngines.BioDNA != nil,
-		})
-	})
-
-	sandboxCore := sandbox.NewAutonomousSandboxCore(adminNumber, db, func(from, body string) string {
-		if wellnessEngine != nil && wellnessEngine.DetectSicknessFromMessage(body) {
-			return wellnessEngine.MarkStudentSick(from, "सैंडबॉक्स छात्र", "दैनिक अभ्यास")
-		}
-		return fullOnboardingEngine.ProcessMessage(from, body)
-	})
-
-	mux.HandleFunc("/sandbox", sandboxCore.RenderSandboxUI)
-	mux.HandleFunc("/api/v1/sandbox/simulate", sandboxCore.HandleSimulation)
-	mux.HandleFunc("/api/v1/sandbox/toggle", sandboxCore.ToggleSimulationStates)
-	mux.HandleFunc("/api/v1/sandbox/audit", sandboxCore.ServeAuditReport)
-
-	server := &http.Server{
-		Addr:         ":" + port,
-		Handler:      mux,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-	}
-
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-
-	go func() {
-		log.Printf("🚀 अनंत अभ्यास क्लस्टर पोर्ट :%s पर पूर्णतः सक्रिय है...", port)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("सर्वर क्रैश त्रुटि: %v", err)
-		}
-	}()
-
-	// ग्रेसफुल शटडाउन और सिंक्रोनाइज़ेशन
-	<-stop
-	log.Println("🛑 शटडाउन सिग्नल प्राप्त हुआ। सक्रिय ऑपरेशन्स सुरक्षित रूप से बंद किए जा रहे हैं...")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	// 1. नए HTTP अनुरोध बंद करना
-	if err := server.Shutdown(ctx); err != nil {
-		log.Printf("⚠️ सर्वर शटडाउन त्रुटि: %v", err)
-	}
-
-	// 2. इनबाउंड कतार बंद करना और वर्कर्स के खत्म होने की प्रतीक्षा (sync.WaitGroup)
-	close(webhookQueue)
-	log.Println("⏳ कतार में शेष मैसेजेस के निष्पादन की प्रतीक्षा...")
-	workerWG.Wait()
-
-	// 3. डेटाबेस कनेक्शन सुरक्षित रूप से बंद करना
-	poolCancel()
-	if db != nil {
-		_ = db.Close()
-	}
-	log.Println("✅ सभी जॉब्स पूरे हुए। डेटाबेस कनेक्शन सुरक्षित रूप से बंद कर दिया गया है।")
-}
+	
