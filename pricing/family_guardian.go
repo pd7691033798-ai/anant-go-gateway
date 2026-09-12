@@ -27,7 +27,7 @@ type ChildProfile struct {
 type ParentAccount struct {
 	ParentUID      string    `json:"parent_uid"`
 	ParentName     string    `json:"parent_name"`
-	PrimaryPhone   string    `json:"primary_phone"` // WhatsApp OTP और रिपोर्ट्स इसी पर जाएंगी
+	PrimaryPhone   string    `json:"primary_phone"`
 	FamilySurname  string    `json:"family_surname"`
 	ActiveDeviceID string    `json:"active_device_id"`
 	LastActiveAt   time.Time `json:"last_active_at"`
@@ -46,14 +46,14 @@ func NewFamilyGuardianService(db *sql.DB, planService *PlanService) *FamilyGuard
 	}
 }
 
-// 1. AddChildWithLock: दोनों प्लान्स (Family: 3 बच्चे, Unlimited: 4 बच्चे) के अनुसार जांच कर 60-दिन का लॉक लगाएगा
+// 1. AddChildWithLock: प्लान अनुसार जांच कर 60-दिन का लॉक लगाएगा
 func (s *FamilyGuardianService) AddChildWithLock(ctx context.Context, parentUID, firstName, lastName, schoolName string, grade int) (*ChildProfile, error) {
 	if strings.TrimSpace(firstName) == "" || strings.TrimSpace(lastName) == "" || strings.TrimSpace(schoolName) == "" {
 		return nil, errors.New("बच्चे का नाम, उपनाम (Surname) और स्कूल का नाम अनिवार्य है")
 	}
 
-	// यूज़र का वर्तमान प्लान निकालें (Family या Family Unlimited)
-	limits, err := s.planService.GetUserPlanLimits(parentUID)
+	// यूज़र का वर्तमान प्लान निकालें (यहाँ ctx अनिवार्य रूप से पास है)
+	limits, err := s.planService.GetUserPlanLimits(ctx, parentUID)
 	if err != nil {
 		return nil, fmt.Errorf("प्लान लिमिट चेक करने में त्रुटि: %w", err)
 	}
@@ -75,7 +75,7 @@ func (s *FamilyGuardianService) AddChildWithLock(ctx context.Context, parentUID,
 
 	childID := generateSecureID("chld_")
 	now := time.Now().UTC()
-	lockDuration := 60 * 24 * time.Hour // 60 दिनों का सख़्त प्रोफ़ाइल लॉक
+	lockDuration := 60 * 24 * time.Hour
 
 	insertQuery := `
 		INSERT INTO family_children (id, parent_uid, first_name, last_name, grade, school_name, created_at, locked_till)
@@ -98,7 +98,7 @@ func (s *FamilyGuardianService) AddChildWithLock(ctx context.Context, parentUID,
 	}, nil
 }
 
-// 2. ValidateProfileModification: 60 दिनों से पहले किसी भी बदलाव या स्लॉट खाली करने को रोकेगा
+// 2. ValidateProfileModification: 60 दिनों से पहले किसी भी बदलाव को रोकेगा
 func (s *FamilyGuardianService) ValidateProfileModification(ctx context.Context, childID string) error {
 	var lockedTill time.Time
 	query := `SELECT locked_till FROM family_children WHERE id = $1`
@@ -118,7 +118,7 @@ func (s *FamilyGuardianService) ValidateProfileModification(ctx context.Context,
 	return nil
 }
 
-// 3. EnforceSingleActiveDevice: समवर्ती (Concurrent) सेशन को रोककर पिछले डिवाइस को लॉगआउट करेगा
+// 3. EnforceSingleActiveDevice: समवर्ती सेशन रोककर पिछले डिवाइस को लॉगआउट करेगा
 func (s *FamilyGuardianService) EnforceSingleActiveDevice(ctx context.Context, parentUID, currentDeviceID string) error {
 	if currentDeviceID == "" {
 		return errors.New("अमान्य डिवाइस आईडी")
@@ -143,7 +143,7 @@ func (s *FamilyGuardianService) EnforceSingleActiveDevice(ctx context.Context, p
 	return nil
 }
 
-// 4. ValidateDeviceSession: पुष्टि करता है कि केवल अधिकृत सक्रिय डिवाइस ही चल रहा है
+// 4. ValidateDeviceSession: केवल अधिकृत डिवाइस सत्र की पुष्टि करता है
 func (s *FamilyGuardianService) ValidateDeviceSession(ctx context.Context, parentUID, requestingDeviceID string) (bool, error) {
 	var activeDeviceID string
 	query := `SELECT COALESCE(active_device_id, '') FROM parent_accounts WHERE parent_uid = $1`
