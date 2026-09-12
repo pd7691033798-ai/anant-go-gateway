@@ -665,6 +665,13 @@ func main() {
 	}
 	log.Println("✅ सभी स्कीमा टेबल्स सत्यापित और अद्यतन हैं।")
 
+	// 🛠️ स्कीमा ऑटो-माइग्रेशन सेफगार्ड (Zero Crash Safety Patches)
+	_ = db.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_locked_until TIMESTAMP WITH TIME ZONE;`)
+	_ = db.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_attempts INT DEFAULT 0;`)
+	_ = db.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_failed_at TIMESTAMP WITH TIME ZONE;`)
+	_ = db.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS consecutive_missed_days INT DEFAULT 0;`)
+	_ = db.Exec(`CREATE TABLE IF NOT EXISTS parent_accounts (parent_uid VARCHAR(64) PRIMARY KEY, parent_name VARCHAR(100) NOT NULL, primary_phone VARCHAR(20) NOT NULL UNIQUE);`)
+
 	// 2. डिस्ट्रीब्यूटेड डेटाबेस-आधारित सुरक्षा, वेलनेस व रिपोर्ट सर्विसेज
 	wellnessEngine = vacation.NewChildWellnessService(db)
 	pinMgr = security.NewPINManager(db)
