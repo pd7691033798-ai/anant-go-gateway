@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -20,21 +21,19 @@ type TempPasscode struct {
 }
 
 type PINManager struct {
-	db              *sql.DB
-	mu              sync.RWMutex
-	activeOTPs      map[string]TempPasscode // phone -> OTP
-	bypassCodes     map[string]TempPasscode // phone -> 15-min passcode
-	alertWebhookURL string
-	httpClient      *http.Client
+	db          *sql.DB
+	mu          sync.RWMutex
+	activeOTPs  map[string]TempPasscode // phone -> OTP
+	bypassCodes map[string]TempPasscode // phone -> 15-min passcode
+	httpClient  *http.Client
 }
 
-func NewPINManager(db *sql.DB, alertWebhookURL string) *PINManager {
+func NewPINManager(db *sql.DB) *PINManager {
 	return &PINManager{
-		db:              db,
-		activeOTPs:      make(map[string]TempPasscode),
-		bypassCodes:     make(map[string]TempPasscode),
-		alertWebhookURL: alertWebhookURL,
-		httpClient:      &http.Client{Timeout: 5 * time.Second},
+		db:          db,
+		activeOTPs:  make(map[string]TempPasscode),
+		bypassCodes: make(map[string]TempPasscode),
+		httpClient:  &http.Client{Timeout: 5 * time.Second},
 	}
 }
 
@@ -66,32 +65,62 @@ func (pm *PINManager) LogSecurityEvent(phone, eventType, details string) {
 	_, _ = pm.db.Exec(query, phone, eventType, details)
 }
 
-// SendWhatsAppAlert: बैकग्राउंड में तुरंत WhatsApp अलर्ट भेजता है
+// SendWhatsAppAlert: Meta Cloud API के ज़रिए माता-पिता को तुरंत WhatsApp सुरक्षा चेतावनी भेजता है
 func (pm *PINManager) SendWhatsAppAlert(phone, message string) {
-	if pm.alertWebhookURL == "" {
+	phoneNumberID := "YOUR_PHONE_NUMBER_ID" // Meta Console से यहाँ अपना Phone Number ID डालें
+	accessToken := "EAAY5HikqIAwBSfF4glFIXCZA5uqTR7QrLQfu0EZBdUiIgWxg5KZCr09DAFZCQvkfd4JxNaJnZAwUcayRT5YH5fYOZAtGv8Wi6o6JWcglMCO1vE0kMZB4hmEQMosNIVZA3S8aNeGti0i6ILJ1ufGa5PZAOAU9imI5MHoemxb7kOhrMo81L8ClG81x3BhvhNwcJfUVfWALOZAwOodYGOuvAjN4HsD03BuZABfL0p306tZBxnYm8Qy9ohlsdMAkUKCIMJDlAEQM6MmbH268qWYbew2u5z1ZB"
+
+	if phoneNumberID == "YOUR_PHONE_NUMBER_ID" || phoneNumberID == "" {
 		return
 	}
+
+	url := fmt.Sprintf("https://graph.facebook.com/v20.0/%s/messages", phoneNumberID)
+
 	go func() {
-		payload := map[string]string{
-			"phone":   phone,
-			"message": message,
+		// 91 कंट्री कोड सुनिश्चित करना
+		formattedPhone := strings.TrimPrefix(phone, "+")
+
+		payload := map[string]interface{}{
+			"messaging_product": "whatsapp",
+			"to":                formattedPhone,
+			"type":              "text",
+			"text": map[string]string{
+				"body": message,
+			},
 		}
-		data, _ := json.Marshal(payload)
-		_, _ = pm.httpClient.Post(pm.alertWebhookURL, "application/json", bytes.NewBuffer(data))
+
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return
+		}
+
+		req, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
+		if err != nil {
+			return
+		}
+
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := pm.httpClient.Do(req)
+		if err != nil {
+			return
+		}
+		defer resp.Body.Close()
 	}()
 }
 
-// VerifyPINWithDailyLock: थ्रॉटलिंग, डेली लॉक और पर्सिस्टेंट सुरक्षा के साथ सत्यापन
+// VerifyPINWithDailyLock: थ्रॉटलिंग, मिडनाइट ऑटो-लॉक और पर्सिस्टेंट सुरक्षा के साथ सत्यापन
 func (pm *PINManager) VerifyPINWithDailyLock(phone, inputPIN string) (bool, string, error) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
 	var (
-		storedHash    sql.NullString
-		salt          sql.NullString
-		lockedUntil   sql.NullTime
+		storedHash     sql.NullString
+		salt           sql.NullString
+		lockedUntil    sql.NullTime
 		failedAttempts int
-		lastFailedAt  sql.NullTime
+		lastFailedAt   sql.NullTime
 	)
 
 	query := `
