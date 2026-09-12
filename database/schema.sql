@@ -1,4 +1,4 @@
--- 1. Users Table (Core Student & Account Profile)
+-- 1. Users Table (Core Student & Account Profile + PIN Security)
 CREATE TABLE IF NOT EXISTS users (
     phone VARCHAR(15) PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
@@ -18,7 +18,16 @@ CREATE TABLE IF NOT EXISTS users (
     sharing_suspicion_score INT DEFAULT 0,
     detected_grade_drift_count INT DEFAULT 0,
     is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+
+    -- 🔐 मास्टर पिन और ज़ीरो-ट्रस्ट सुरक्षा कॉलम
+    pin_hash VARCHAR(255),
+    pin_salt VARCHAR(64),
+    pin_locked_until TIMESTAMP WITH TIME ZONE,
+    failed_attempts INT DEFAULT 0,
+    last_failed_at TIMESTAMP WITH TIME ZONE,
+    daily_bypass_count INT DEFAULT 0,
+    bypass_reset_at TIMESTAMP WITH TIME ZONE
 );
 
 -- 2. State Academic Calendars
@@ -109,9 +118,18 @@ CREATE TABLE IF NOT EXISTS family_children (
     locked_till TIMESTAMP WITH TIME ZONE NOT NULL
 );
 
+-- 10. Security Audit Logs (पिन सुरक्षा और गतिविधि ऑडिट)
+CREATE TABLE IF NOT EXISTS security_audit_logs (
+    id SERIAL PRIMARY KEY,
+    parent_phone VARCHAR(20) NOT NULL,
+    event_type VARCHAR(50) NOT NULL,
+    details TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Indexing for Fast Query Performance & High Concurrency
 CREATE INDEX IF NOT EXISTS idx_family_children_parent ON family_children(parent_uid);
 CREATE INDEX IF NOT EXISTS idx_parent_primary_phone ON parent_accounts(primary_phone);
 CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
 CREATE INDEX IF NOT EXISTS idx_submission_logs_phone ON submission_logs(student_phone);
-
+CREATE INDEX IF NOT EXISTS idx_security_audit_phone ON security_audit_logs(parent_phone);
