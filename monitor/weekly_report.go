@@ -120,3 +120,8 @@ func (w *WeeklyReportService) FormatWhatsAppReportCard(wp WeeklyProgress) string
 	)
 }
 
+// GenerateSummary - main.go की कंपाइलेशन त्रुटि को दूर करने के लिए जोड़ा गया मेथड
+func (w *WeeklyReportService) GenerateSummary(ctx context.Context, studentUID, studentName, dialect string) string {
+	report := w.GenerateSundayReport(ctx, studentUID, studentName, dialect)
+	return w.FormatWhatsAppReportCard(report)
+}
