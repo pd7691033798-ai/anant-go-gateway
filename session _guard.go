@@ -22,7 +22,7 @@ type StudentSession struct {
 	ScheduledEndAt  time.Time    `json:"scheduled_end_at"`  // StartedAt + 60m
 	HardGraceEndAt  time.Time    `json:"hard_grace_end_at"` // ScheduledEndAt + 60s
 	CurrentState    SessionState `json:"current_state"`
-	LastStrokeEvent time.Time    `json:"last_stroke_event"` // छात्र के अंतिम टच/पेन का समय
+	LastStrokeEvent time.Time    `json:"last_stroke_event"` // छात्र की अंतिम गतिविधि का समय
 	IsSubmitted     bool         `json:"is_submitted"`
 }
 
@@ -48,7 +48,7 @@ func (s *SessionGuardService) StartNewSession(sessionID, phone string) *StudentS
 		StudentPhone:    phone,
 		StartedAt:       now,
 		ScheduledEndAt:  now.Add(60 * time.Minute),
-		HardGraceEndAt:  now.Add(61 * time.Minute), // 60 सेकंड का अनिवार्य ग्रेस
+		HardGraceEndAt:  now.Add(61 * time.Minute), // 61 मिनट का हार्ड ग्रेस लिमिट
 		CurrentState:    StateActive,
 		LastStrokeEvent: now,
 		IsSubmitted:     false,
@@ -58,12 +58,12 @@ func (s *SessionGuardService) StartNewSession(sessionID, phone string) *StudentS
 	return session
 }
 
-// CheckSessionStatus: ऐप के प्रत्येक 10-सेकंड पिंग पर स्थिति की गणना करता है
+// CheckSessionStatus: सत्र की स्थिति की गणना करता है
 func (s *SessionGuardService) CheckSessionStatus(sessionID string, hasActiveStroke bool) (*StudentSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	sess, exists := s.sessions[sessionID]
+이 sess, exists := s.sessions[sessionID]
 	if !exists {
 		return nil, errors.New("सत्र अमान्य है या समाप्त हो चुका है")
 	}
@@ -78,7 +78,7 @@ func (s *SessionGuardService) CheckSessionStatus(sessionID string, hasActiveStro
 		sess.LastStrokeEvent = now
 	}
 
-	// 1. यदि 61 मिनट (हार्ड ग्रेस) भी समाप्त हो चुके हैं
+	// 1. यदि 61 मिनट (हार्ड ग्रेस) समाप्त हो चुके हैं
 	if now.After(sess.HardGraceEndAt) {
 		sess.CurrentState = StateLocked
 		return sess, nil
@@ -86,7 +86,6 @@ func (s *SessionGuardService) CheckSessionStatus(sessionID string, hasActiveStro
 
 	// 2. यदि 60 मिनट पूरे हो चुके हैं (ग्रेस बफ़र निर्णय)
 	if now.After(sess.ScheduledEndAt) {
-		// यदि छात्र पिछले 90 सेकंड में सक्रिय था, तो 60 सेकंड का अतिरिक्त ग्रेस दें
 		if time.Since(sess.LastStrokeEvent) < 90*time.Second {
 			sess.CurrentState = StateGraceOvertime
 			return sess, nil
