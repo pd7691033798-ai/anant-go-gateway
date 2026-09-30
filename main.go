@@ -1146,4 +1146,59 @@ func main() {
 			"system":        "Anant Abhyas Ultra Core",
 			"cluster_state": "ACTIVE",
 			"auto_pay":      "ENFORCED_MANDATE_ONLY",
-			"active_tracks": []st
+			"active_tracks": []string{"NAVODAYA", "SAINIK_SCHOOL", "NDA", "IIT_JEE"},
+			"anti_sharing":  hub.CoreEngines.AntiSharing != nil,
+			"biometric_dna": hub.CoreEngines.BioDNA != nil,
+		})
+	})
+
+	sandboxCore := sandbox.NewAutonomousSandboxCore(adminNumber, db, func(from, body string) string {
+		if wellnessEngine != nil && wellnessEngine.DetectSicknessFromMessage(body) {
+			return wellnessEngine.MarkStudentSick(from, "सैंडबॉक्स छात्र", "दैनिक अभ्यास")
+		}
+		return fullOnboardingEngine.ProcessMessage(from, body)
+	})
+
+	mux.HandleFunc("/sandbox", sandboxCore.RenderSandboxUI)
+	mux.HandleFunc("/api/v1/sandbox/simulate", sandboxCore.HandleSimulation)
+	mux.HandleFunc("/api/v1/sandbox/toggle", sandboxCore.ToggleSimulationStates)
+	mux.HandleFunc("/api/v1/sandbox/audit", sandboxCore.ServeAuditReport)
+
+	server := &http.Server{
+		Addr:         ":" + port,
+		Handler:      mux,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		log.Printf("🚀 अनंत अभ्यास क्लस्टर पोर्ट :%s पर पूर्णतः सक्रिय है...", port)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("सर्वर क्रैश त्रुटि: %v", err)
+		}
+	}()
+
+	// ग्रेसफुल शटडाउन और सिंक्रोनाइज़ेशन
+	<-stop
+	log.Println("🛑 शटडाउन सिग्नल प्राप्त हुआ। सक्रिय ऑपरेशन्स सुरक्षित रूप से बंद किए जा रहे हैं...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Printf("⚠️ सर्वर शटडाउन त्रुटि: %v", err)
+	}
+
+	close(webhookQueue)
+	log.Println("⏳ कतार में शेष मैसेजेस के निष्पादन की प्रतीक्षा...")
+	workerWG.Wait()
+
+	poolCancel()
+	if db != nil {
+		_ = db.Close()
+	}
+	log.Println("✅ सभी जॉब्स पूरे हुए। डेटाबेस कनेक्शन सुरक्षित रूप से बंद कर दिया गया है। मैदान तैयार है!")
+}
