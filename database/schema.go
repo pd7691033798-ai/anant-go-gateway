@@ -5,7 +5,7 @@ import (
 	"log"
 )
 
-// InitSchema डेटाबेस में आवश्यक टेबल्स (जैसे यूज़र, सब्सक्रिप्शन और कोटा) स्वतः बनाता है
+// InitSchema डेटाबेस में आवश्यक टेबल्स (जैसे यूज़र, सब्सक्रिप्शन जिसमें फैमिली और अनलिमिटेड फैमिली शामिल हैं, और कोटा) स्वतः बनाता है
 func InitSchema(db *sql.DB) error {
 	query := `
 	-- 1. यूज़र टेबल (WhatsApp नंबर आधारित)
@@ -17,11 +17,11 @@ func InitSchema(db *sql.DB) error {
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
 
-	-- 2. सब्सक्रिप्शन और प्लान टेबल (Demo, Basic, Pro, Family)
+	-- 2. सब्सक्रिप्शन और प्लान टेबल (Demo, Basic, Pro, Family, Unlimited Family)
 	CREATE TABLE IF NOT EXISTS subscriptions (
 		id SERIAL PRIMARY KEY,
 		whatsapp_number VARCHAR(20) REFERENCES users(whatsapp_number),
-		plan_tier VARCHAR(20) NOT NULL, -- DEMO, BASIC, PRO, FAMILY
+		plan_tier VARCHAR(30) NOT NULL, -- DEMO, BASIC, PRO, FAMILY, UNLIMITED_FAMILY
 		status VARCHAR(20) DEFAULT 'ACTIVE', -- ACTIVE, EXPIRED
 		batch_id VARCHAR(50),
 		start_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -45,6 +45,6 @@ func InitSchema(db *sql.DB) error {
 		return err
 	}
 
-	log.Println("✅ सभी डेटाबेस टेबल्स (Users, Subscriptions, Usage) सफलतापूर्वक तैयार हो गई हैं!")
+	log.Println("✅ फैमिली और अनलिमिटेड फैमिली पैक सहित सभी डेटाबेस टेबल्स सफलतापूर्वक तैयार हो गई हैं!")
 	return nil
 }
