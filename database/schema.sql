@@ -1,17 +1,19 @@
 -- ============================================================================
--- अनंत अभ्यास (ANANT ABHYAS) - 360° पैन-इंडिया प्रोडक्शन डेटाबेस स्कीमा
+-- अनंत अभ्यास (ANANT ABHYAS) - 360° पैन-इंडिया प्रोडक्शन डेटाबेस स्कीमा (अपडेटेड)
 -- ============================================================================
 
--- 1. Users Table (Core Student & Account Profile + PIN Security + UPI Grace Flow)
+-- 1. Users Table (Core Student & Account Profile + PIN Security + UPI Grace Flow + Plan Tiers)
 CREATE TABLE IF NOT EXISTS users (
     phone VARCHAR(20) PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     grade INT NOT NULL,
-    state VARCHAR(50),                         -- ऑनबोर्डिंग द्वारा निर्धारित (कोई हार्डकोडेड राज्य नहीं)
-    district VARCHAR(50),                      -- ऑनबोर्डिंग द्वारा निर्धारित (कोई हार्डकोडेड जिला नहीं)
-    preferred_dialect VARCHAR(50),             -- शुद्ध डायनामिक (यूजर चयन/डिटेक्शन पर आधारित, कोई भाषा पक्षपात नहीं)
+    state VARCHAR(50),                         -- ऑनबोर्डिंग द्वारा निर्धारित 
+    district VARCHAR(50),                      -- ऑनबोर्डिंग द्वारा निर्धारित 
+    preferred_dialect VARCHAR(50),             -- शुद्ध डायनामिक (यूजर चयन/डिटेक्शन पर आधारित)
     custom_interest_topic VARCHAR(100),        -- बच्चे की व्यक्तिगत रुचि (डायनामिक AI प्रोफाइलिंग)
-    plan_tier VARCHAR(20) DEFAULT 'DEMO',
+    
+    -- 📦 प्लान और सब्सक्रिप्शन टियर (DEMO, BASIC, PRO, FAMILY, UNLIMITED_FAMILY समर्थित)
+    plan_tier VARCHAR(30) DEFAULT 'DEMO',      
     plan_expires_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() + INTERVAL '7 days',
     consecutive_paid_months INT DEFAULT 1,
     streak_count INT DEFAULT 0,
@@ -120,7 +122,7 @@ CREATE TABLE IF NOT EXISTS parent_accounts (
 CREATE TABLE IF NOT EXISTS family_children (
     id VARCHAR(64) PRIMARY KEY,
     parent_uid VARCHAR(64) REFERENCES parent_accounts(parent_uid) ON DELETE CASCADE,
-    student_phone VARCHAR(20) REFERENCES users(phone) ON DELETE SET NULL, -- सीधे छात्र प्रोफाइल से लिंक
+    student_phone VARCHAR(20) REFERENCES users(phone) ON DELETE SET NULL, 
     first_name VARCHAR(50) NOT NULL,
     last_name VARCHAR(50) NOT NULL,
     grade INT NOT NULL,
@@ -147,6 +149,4 @@ CREATE INDEX IF NOT EXISTS idx_family_children_parent ON family_children(parent_
 CREATE INDEX IF NOT EXISTS idx_family_children_student ON family_children(student_phone);
 CREATE INDEX IF NOT EXISTS idx_submission_logs_phone ON submission_logs(student_phone);
 CREATE INDEX IF NOT EXISTS idx_security_audit_phone ON security_audit_logs(parent_phone);
-
--- 30-दिवसीय DPDPA 2023 ऑटो-डिलीशन को तेज करने के लिए टाइमस्टैम्प इंडेक्स
 CREATE INDEX IF NOT EXISTS idx_submission_logs_retention ON submission_logs(submitted_at);
