@@ -33,6 +33,7 @@ import (
 	"anant-abhyas/parental"
 	"anant-abhyas/pricing"
 	newpricing "anant-abhyas/pricing"
+	"anant-abhyas/router" // 🚀 सेंट्रल रजिस्ट्री पैकेज (ऑटो-राउटिंग के लिए)
 	"anant-abhyas/sandbox"
 	"anant-abhyas/scale"
 	"anant-abhyas/security"
@@ -40,6 +41,9 @@ import (
 	"anant-abhyas/support"
 	"anant-abhyas/temporal"
 	"anant-abhyas/vacation"
+
+	// 🚀 '_ ' लगाने से Go स्वतः इन मॉड्यूल्स के init() को चलाकर सेंट्रल रजिस्ट्री में रजिस्टर कर लेगा
+	_ "anant-abhyas/voicegateway"
 
 	_ "github.com/lib/pq"
 )
@@ -196,42 +200,37 @@ func PlanValidationMiddleware(db *sql.DB, next http.HandlerFunc) http.HandlerFun
 		var planTier string
 		err := db.QueryRow("SELECT plan_tier FROM users WHERE phone = $1", cleanPhone).Scan(&planTier)
 		if err != nil {
-			// यदि यूजर डेटाबेस में नहीं है तो डिफ़ॉल्ट DEMO मानकर आगे बढ़ने दें या रोकें
 			planTier = "DEMO"
 		}
 
 		planTier = strings.ToUpper(strings.TrimSpace(planTier))
 
-		// 1. अनलिमिटेड फैमिली, फॅमिली या प्रो पैक के लिए सीधी अनुमति (असीमित एक्सेस)
 		if planTier == "UNLIMITED_FAMILY" || planTier == "FAMILY" || planTier == "PRO" {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		// 2. डेमो या बेसिक पैक के लिए दैनिक उपयोग (Daily Usage) और कोटे की सख्त जाँच
 		if planTier == "DEMO" || planTier == "BASIC" {
 			var scansUsed, qaUsed int
 			usageQuery := `SELECT scans_used, qa_questions_used FROM daily_usage WHERE whatsapp_number = $1 AND usage_date = CURRENT_DATE`
 			err = db.QueryRow(usageQuery, cleanPhone).Scan(&scansUsed, &qaUsed)
 
 			if err == nil {
-				// डेमो पैक के लिए दैनिक सीमा (जैसे अधिकतम 5 स्कैन/सवाल)
 				if planTier == "DEMO" && (scansUsed >= 5 || qaUsed >= 5) {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusPaymentRequired)
 					json.NewEncoder(w).Encode(map[string]interface{}{
-						"status":        "QUOTA_EXHAUSTED",
-						"plan_tier":     planTier,
-						"scans_used":    scansUsed,
-						"qa_used":       qaUsed,
-						"message":       "आपका दैनिक डेमो कोटा समाप्त हो गया है। बिना सीमा के उपयोग के लिए कृपया 'FAMILY' या 'UNLIMITED_FAMILY' पैक पर अपग्रेड करें!",
+						"status":     "QUOTA_EXHAUSTED",
+						"plan_tier":  planTier,
+						"scans_used": scansUsed,
+						"qa_used":    qaUsed,
+						"message":    "आपका दैनिक डेमो कोटा समाप्त हो गया है। बिना सीमा के उपयोग के लिए कृपया 'FAMILY' या 'UNLIMITED_FAMILY' पैक पर अपग्रेड करें!",
 					})
 					return
 				}
 			}
 		}
 
-		// सब कुछ सही होने पर अगले राउट/हैंडलर को कॉल करें
 		next.ServeHTTP(w, r)
 	}
 }
@@ -247,7 +246,6 @@ var (
 	dailyLimiter         *StrictDailyLimiter
 	sickTracker          *SicknessAuditTracker
 
-	// कतार और ऑटो-स्केलिंग वर्कर्स नियंत्रण
 	webhookQueue  = make(chan WebhookJob, 2000)
 	workerWG      sync.WaitGroup
 	activeWorkers int32
@@ -266,7 +264,6 @@ func init() {
 	sessionGuard = monitor.NewSessionGuardService()
 }
 
-// 📱 Meta-Compliant WhatsApp आउटबाउंड
 func SendWhatsAppMessage(to, message string, isTemplate bool, templateName, langCode string) {
 	if metaPhoneNumberID == "" || metaAccessToken == "" {
 		log.Printf("📱 [स्थानीय कंसोल संदेश -> %s]:\n%s\n", to, message)
@@ -509,7 +506,7 @@ func processIncomingMessage(from, body string) {
 
 		days, isHighRisk := sickTracker.RegisterSickDay(cleanFrom)
 		if isHighRisk {
-			alertMsg := fmt.Sprintf("⚠️ सुरक्षा व अध्ययन संतुलन चेतावनी: विद्यार्थी लगातार %d दिनों से अनुपस्थित दर्ज हो रहा है।\n\nअनंत अभ्यास नीति अनुसार, आगे की छूट के लिए अभिभावक सत्यापन अनिवार्य है। कृपया 'PIN-XXXX' प्रारूप में 4-अंकों का मास्टर PIN दर्ज करें अथवा 10-सेकंड का वॉयस नोट भेजें।", days)
+			alertMsg := fmt.Sprintf("⚠️ सुरक्षा व अध्ययन संतुलन चेतावनी: विद्यार्थी लगातार %d दिनों से अनुपस्थित दर्ज हो रहा है。\n\nअनंत अभ्यास नीति अनुसार, आगे की छूट के लिए अभिभावक सत्यापन अनिवार्य है। कृपया 'PIN-XXXX' प्रारूप में 4-अंकों का मास्टर PIN दर्ज करें अथवा 10-सेकंड का वॉयस नोट भेजें।", days)
 			sickTracker.SetPendingAuth(cleanFrom, true)
 			SendWhatsAppMessage(cleanFrom, alertMsg, false, "", "")
 			return
@@ -607,7 +604,7 @@ func renderCertificateHTML(p *parental.CompleteParentProfile) string {
       </div>
     </div>
 	
-<div class="metrics">
+    <div class="metrics">
       <div><div style="font-size: 11px; color: #64748b;">परीक्षण अंक</div><div class="val highlight">%d / 20</div></div>
       <div><div style="font-size: 11px; color: #64748b;">सटीकता दर</div><div class="val">80%%%%</div></div>
       <div><div style="font-size: 11px; color: #64748b;">कुल समय</div><div class="val">%d सेकंड</div></div>
@@ -1083,7 +1080,7 @@ func main() {
 		w.Write([]byte(`{"status":"SETTLEMENT_CONFIRMED_AND_UNLOCKED"}`))
 	})
 
-	// 🔒 प्रोटेक्टेड CBT सबमिशन एंडपॉइंट (यहाँ PlanValidationMiddleware लागू कर दिया गया है)
+	// 🔒 प्रोटेक्टेड CBT सबमिशन एंडपॉइंट
 	mux.HandleFunc("/api/v1/cbt/submit", PlanValidationMiddleware(db, func(w http.ResponseWriter, r *http.Request) {
 		var sub exam.CBTSessionSubmission
 		if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
@@ -1163,6 +1160,11 @@ func main() {
 	mux.HandleFunc("/api/v1/sandbox/simulate", sandboxCore.HandleSimulation)
 	mux.HandleFunc("/api/v1/sandbox/toggle", sandboxCore.ToggleSimulationStates)
 	mux.HandleFunc("/api/v1/sandbox/audit", sandboxCore.ServeAuditReport)
+
+	// ==========================================
+	// 🚀 CENTRAL REGISTRY AUTO-ROUTING INTEGRATION
+	// ==========================================
+	router.InitAllRoutes(mux, db)
 
 	server := &http.Server{
 		Addr:         ":" + port,
