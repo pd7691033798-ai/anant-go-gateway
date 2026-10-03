@@ -3,6 +3,7 @@ package featurephone
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 type FeaturePhoneEngine struct {
@@ -14,13 +15,13 @@ func NewFeaturePhoneEngine(db *sql.DB) *FeaturePhoneEngine {
 	return &FeaturePhoneEngine{db: db}
 }
 
-// GenerateIVRScriptFromDB डेटाबेस से छात्र का डेटा फेच करके 28 राज्यों की बोलियों के अनुसार IVR स्क्रिप्ट बनाता है
+// GenerateIVRScriptFromDB डेटाबेस से छात्र का डेटा (नाम, राज्य, भाषा, सवाल) फेच करके IVR स्क्रिप्ट बनाता है
 func (f *FeaturePhoneEngine) GenerateIVRScriptFromDB(studentID int) (string, error) {
-	var studentName, stateCode, mathProblem string
+	var studentName, stateCode, language, mathProblem string
 
-	// डेटाबेस से असली छात्र का नाम, राज्य कोड और आज का सवाल निकालना
-	query := "SELECT name, state_code, todays_problem FROM students WHERE id = $1"
-	err := f.db.QueryRow(query, studentID).Scan(&studentName, &stateCode, &mathProblem)
+	// डेटाबेस से असली छात्र का डेटा निकालना (भाषा कॉलम के साथ)
+	query := "SELECT name, state_code, language, todays_problem FROM students WHERE id = $1"
+	err := f.db.QueryRow(query, studentID).Scan(&studentName, &stateCode, &language, &mathProblem)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return "", fmt.Errorf("student not found")
@@ -28,7 +29,13 @@ func (f *FeaturePhoneEngine) GenerateIVRScriptFromDB(studentID int) (string, err
 		return "", err
 	}
 
-	// 28 राज्यों और क्षेत्रीय भाषाओं के स्वागत/निर्देश टेम्पलेट्स
+	// 1. यदि छात्र/अभिभावक की प्राथमिकता अंग्रेजी (English) है
+	if strings.ToUpper(language) == "ENGLISH" {
+		template := "Hello %s! Please take your notebook and pen. Today's 15-minute challenge is: %s. Press 1 after writing."
+		return fmt.Sprintf(template, studentName, mathProblem), nil
+	}
+
+	// 2. 28 राज्यों और क्षेत्रीय बोलियों के स्वागत/निर्देश टेम्पलेट्स
 	templates := map[string]string{
 		"RAJASTHAN":   "राम राम सा! %s बेटा, कॉपी ते पैन चक्को। आज रो सवाल है: %s। लिखण के बाद 1 दबाओ।",
 		"PUNJAB":      "सत श्री अकाल जी! %s पुत्तर, अपनी कापी ते पेन चक्को। आज दा सवाल है: %s। लिख के 1 दबाओ।",
@@ -38,7 +45,7 @@ func (f *FeaturePhoneEngine) GenerateIVRScriptFromDB(studentID int) (string, err
 	}
 
 	// यदि राज्य का विशेष टेम्पलेट मिल जाए, तो वह उपयोग करें; अन्यथा डिफ़ॉल्ट हिंदी
-	template, exists := templates[stateCode]
+	template, exists := templates[strings.ToUpper(stateCode)]
 	if !exists {
 		template = "नमस्ते! %s, कृपया अपनी कॉपी और पेन निकालें। आज का 15-मिनट का सवाल है: %s। लिखने के बाद 1 दबाएं।"
 	}
@@ -46,7 +53,10 @@ func (f *FeaturePhoneEngine) GenerateIVRScriptFromDB(studentID int) (string, err
 	return fmt.Sprintf(template, studentName, mathProblem), nil
 }
 
-// GenerateDailyTaskSMS SMS द्वारा छात्र को दैनिक कार्य भेजने के लिए
-func (f *FeaturePhoneEngine) GenerateDailyTaskSMS(studentName, problem string) string {
+// GenerateDailyTaskSMS SMS द्वारा छात्र को दैनिक कार्य भेजने के लिए (भाषा के आधार पर हिंदी या अंग्रेजी)
+func (f *FeaturePhoneEngine) GenerateDailyTaskSMS(studentName, problem, language string) string {
+	if strings.ToUpper(language) == "ENGLISH" {
+		return fmt.Sprintf("Anant Abhyaas: Hello %s, today's practice task: %s. Please complete and write it down within 15 minutes!", studentName, problem)
+	}
 	return fmt.Sprintf("अनंत अभ्यास: %s बेटा, आज का अभ्यास: %s। इसे 15 मिनट में लिखकर रखें!", studentName, problem)
 }
