@@ -8,65 +8,56 @@ import (
 )
 
 type NotepadEngine struct {
-	db        *sql.DB
-	refiner   *RefinementEngine
+	db *sql.DB
 }
 
 func NewNotepadEngine(db *sql.DB) *NotepadEngine {
-	return &NotepadEngine{
-		db:      db,
-		refiner: NewRefinementEngine(),
-	}
+	return &NotepadEngine{db: db}
 }
 
-// 1. यह मुख्य फंक्शन है जो तेरे नोटपैड के लिखे हुए हर शब्द को कैच करेगा
+// ProcessNotepadInput - यह नोटपैड से लिखे गए हर विचार को सुरक्षित तरीके से कैप्चर करता है
 func (ne *NotepadEngine) ProcessNotepadInput(rawThought string) (string, error) {
 	thought := strings.TrimSpace(rawThought)
 	if thought == "" {
-		return "", fmt.Errorf("[SYNTAX ERROR] फाइल खाली है: कृपया नोटपैड में निर्देश स्पष्ट लिखें।")
+		return "", fmt.Errorf("[SYNTAX ERROR] नोटपैड खाली है: कृपया स्पष्ट निर्देश लिखें।")
 	}
 
-	log.Printf("[NOTEPAD INPUT RECEIVED] Processing admin instruction...", )
-
-	// 2. सुरक्षा और शुद्धता के लिए पहले इसे 'रिफाइनमेंट इंजन' से गुजारेंगे (Quality Gate)
-	// (अगर तूने नोटपैड में कोई कोड या लॉजिक लिखा है, तो यह उसे स्कैन करेगा)
-	_, refinementErr := ne.refiner.RefineSystemComponent("NotepadInstruction", thought)
-	if refinementErr != nil {
-		return "", fmt.Errorf("[REFINEMENT FAILED] आपके निर्देश में सिंटेक्स या लॉजिकल त्रुटि है: %v", refinementErr)
+	// 1. सुरक्षा जाँच (SQL Injection और खतरनाक कमांड्स को ब्लॉक करना)
+	thoughtUpper := strings.ToUpper(thought)
+	if strings.Contains(thoughtUpper, "DROP TABLE") || 
+	   strings.Contains(thoughtUpper, "DELETE FROM") || 
+	   strings.Contains(thoughtUpper, "TRUNCATE") ||
+	   strings.Contains(thoughtUpper, "EXEC") {
+		log.Printf("[SECURITY ALERT] Dangerous command blocked from notepad: %s", thought)
+		return "", fmt.Errorf("[SECURITY VIOLATION] खतरनाक या अनधिकृत डेटाबेस कमांड ब्लॉक कर दी गई है।")
 	}
 
 	thoughtLower := strings.ToLower(thought)
 
-	// 3. यह तय करना कि यह निर्देश किस कैटेगोरी में जाएगा
+	// 2. कैटेगरी पहचानना और सुरक्षित रूप से डेटाबेस में भेजना
 	if strings.Contains(thoughtLower, "feature") || strings.Contains(thoughtLower, "जोड़ो") || strings.Contains(thoughtLower, "add") {
-		return ne.executeFeatureInjection(thought)
+		return ne.saveRuleToDB(thought, "FEATURE")
 	}
 
 	if strings.Contains(thoughtLower, "price") || strings.Contains(thoughtLower, "discount") || strings.Contains(thoughtLower, "फीस") || strings.Contains(thoughtLower, "डिस्काउंट") {
-		return ne.executePricingInjection(thought)
+		return ne.saveRuleToDB(thought, "PRICING")
 	}
 
-	// 4. अगर निर्देश समझ नहीं आया, तो जैसा तूने कहा था—फाइल नॉट फाउंड का एरर फेंको!
-	log.Printf("[ERROR] Unrecognized instruction pattern: %s", thought)
-	return "", fmt.Errorf("[FILE NOT FOUND / SYNTAX ERROR] सिस्टम इस निर्देश को किसी भी इंजन या फोल्डर में मैप नहीं कर सका। कृपया वाक्य या नियम को सुधार कर दोबारा लिखें।")
+	// 3. अगर सिस्टम को निर्देश समझ न आए (तेरी माँगी हुई एरर)
+	log.Printf("[SYNTAX UNRECOGNIZED] Instruction not matched: %s", thought)
+	return "", fmt.Errorf("[FILE NOT FOUND / SYNTAX UNRECOGNIZED] सिस्टम इस निर्देश को किसी भी इंजन या फोल्डर में मैप नहीं कर सका। कृपया वाक्य या नियम को सुधार कर दोबारा लिखें।")
 }
 
-// नियम 1: फीचर को ऑटोमैटिक डायनेमिक डायरेक्ट्री में डालना
-func (ne *NotepadEngine) executeFeatureInjection(instruction string) (string, error) {
-	query := `INSERT INTO dynamic_rules (rule_text, rule_type, is_active, created_at) VALUES ($1, 'FEATURE', true, NOW())`
-	_, err := ne.db.Exec(query, instruction)
+// सुरक्षित रूप से डेटाबेस में नियम सेव करने का फंक्शन (Parameterized Query)
+func (ne *NotepadEngine) saveRuleToDB(ruleText, ruleType string) (string, error) {
+	query := `INSERT INTO dynamic_rules (rule_text, rule_type, is_active, created_at) VALUES ($1, $2, true, NOW())`
+	
+	// यहाँ सीधे स्ट्रिंग जोड़ने के बजाय $1 का उपयोग किया गया है ताकि कोई SQL Injection न हो सके
+	_, err := ne.db.Exec(query, ruleText, ruleType)
 	if err != nil {
-		return "", fmt.Errorf("डेटाबेस में फीचर इंजेक्ट करते वक्त एरर आया: %v", err)
+		log.Printf("[DATABASE ERROR] Failed to save rule: %v", err)
+		return "", fmt.Errorf("डेटाबेस में सेव करते वक्त त्रुटि आई: %v", err)
 	}
-	return "✅ [SUCCESS] नोटपैड के निर्देश को पढ़ लिया गया है। 'सिस्टम रिफाइनमेंट' पास हो चुका है और नया फीचर नियम डेटाबेस में लाइव हो गया है!", nil
-}
 
-// नियम 2: प्राइसिंग या डिस्काउंट नियम को ऑटोमैटिक सेट करना
-func (ne *NotepadEngine) executePricingInjection(instruction string) (string, error) {
-	query := `INSERT INTO dynamic_rules (rule_text, rule_type, is_active, created_at) VALUES ($1, 'PRICING', true, NOW())`
-	_, err := ne.db.Exec(query, instruction)
-	if err != nil {
-		return "", fmt.Errorf("प्राइसिंग रूल सेव नहीं हो सका: %v", err)
-	}
-	return "💰 [SUCCESS] नया प्राइसिंग/डिस्काउंट नियम नोटपैड से सफलताપૂર્વक कैप्चर कर लिया गया है। ऑटो-पे इंजन अब इसे लागू करेगा!", nil
+	return fmt.Sprintf("✅ [SUCCESS] %s नियम को नोटपैड से सफलताપૂર્વक सुरक्षित रूप से दर्ज कर लिया गया है!", ruleType), nil
 }
