@@ -4,3 +4,5 @@ faster-whisper
 gTTS
 deep-translator
 httpx
+pydantic
+requests
