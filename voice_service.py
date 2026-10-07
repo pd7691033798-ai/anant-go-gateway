@@ -6,19 +6,23 @@ from deep_translator import GoogleTranslator
 import os
 import uuid
 import sqlite3
-import asyncio
 import threading
+import asyncio
+import httpx
 import uvicorn
 
-app = FastAPI(title="Anant Abhyaas Ultimate Enterprise Voice Engine")
+app = FastAPI(title="Anant Abhyaas Redis-Ready Cloud Voice Gateway")
 
-# --- 1. थ्रेड-सेफ SQLite डेटाबेस सेटअप (Database Lock & Concurrency Safe) ---
-DB_FILE = "anant_learning.db"
+# --- 1. एब्स्ट्रैक्टेड डेटाबेस सेटअप ---
+DB_URL = os.getenv("DATABASE_URL", "anant_voice_logs.db")
 db_lock = threading.Lock()
 
-def init_db():
+VOICE_ARCHIVE_DIR = os.getenv("VOICE_ARCHIVE_DIR", "archived_voice_samples")
+os.makedirs(VOICE_ARCHIVE_DIR, exist_ok=True)
+
+def init_voice_db():
     with db_lock:
-        conn = sqlite3.connect(DB_FILE, timeout=30.0)
+        conn = sqlite3.connect(DB_URL, timeout=30.0)
         cursor = conn.cursor()
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS voice_learning_logs (
@@ -27,6 +31,7 @@ def init_db():
                 target_lang TEXT,
                 recognized_text TEXT,
                 processed_text TEXT,
+                sample_path TEXT,
                 is_trained INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -34,138 +39,211 @@ def init_db():
         conn.commit()
         conn.close()
 
-init_db()
+init_voice_db()
 
-# --- 2. Whisper मॉडल का सिंगल-ग्लोबल लोड (Memory & Speed Optimized) ---
-print("Whisper AI इंजन लोड हो रहा है...")
+# --- 2. Whisper मॉडल का क्लाउड लोड ---
+print("Whisper AI क्लाउड इंजन लोड हो रहा है...")
 model = WhisperModel("base", compute_type="int8")
 
-# --- 3. क्रैश-प्रूफ ऑटो-लर्निंग और ऑटो-ट्यूनिंग बैकग्राउंड वर्कर ---
-async def background_auto_learning_worker():
-    """
-    यह बैकग्राउंड वर्कर सर्वर पर लोड कम होने या तय समय पर पिछले 
-    डेटाबेस लॉग्स से खुद सीखकर (Auto-Tuning) सिस्टम को रिफाइन करेगा।
-    """
-    while True:
-        await asyncio.sleep(120)  # हर 2 मिनट पर चेक करेगा
+KNOWLEDGE_CORE_URL = os.getenv("KNOWLEDGE_CORE_URL", "http://localhost:8001/get-knowledge")
+http_client = httpx.AsyncClient(timeout=10.0)
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await http_client.aclose()
+
+# --- 3. REDIS-READY ABSTRACTED QUEUE INTERFACE ---
+# यह लेयर आज Memory Queue की तरह काम कर रही है। भविष्य में इसे सीधे Redis backend से बदला जा सकता है।
+class AbstractTaskQueue:
+    def __init__(self, maxsize: int):
+        self.queue = asyncio.Queue(maxsize=maxsize)
+    
+    async def put(self, item: dict, block: bool = True):
+        if block:
+            await self.queue.put(item)
+        else:
+            self.queue.put_nowait(item)
+            
+    async def get(self) -> dict:
+        return await self.queue.get()
+        
+    def task_done(self):
+        self.queue.task_done()
+        
+    def qsize(self) -> int:
+        return self.queue.qsize()
+
+MAX_QUEUE_SIZE = int(os.getenv("MAX_QUEUE_SIZE", 5000))
+task_queue = AbstractTaskQueue(maxsize=MAX_QUEUE_SIZE)
+
+# --- 4. सिंगल टास्क प्रोसेसिंग यूनिट ---
+async def process_single_task(task_data):
+    temp_audio_path = task_data["temp_audio_path"]
+    output_audio_path = task_data["output_audio_path"]
+    source_lang = task_data["source_lang"]
+    desired_target_lang = task_data["desired_target_lang"]
+    grade = task_data["grade"]
+    stream = task_data["stream"]
+    board = task_data["board"]
+    external_api_url = task_data["external_api_url"]
+    unique_id = task_data["unique_id"]
+    future = task_data["future"]
+
+    archived_sample_path = None
+
+    try:
+        # STEP 1: वॉयस सैंपल आर्काइव करना (फ्यूचर ट्रेनिंग के लिए डेटा बैंक)
+        safe_ext = os.path.splitext(temp_audio_path)[1] or ".wav"
+        archived_sample_path = os.path.join(VOICE_ARCHIVE_DIR, f"sample_{unique_id}{safe_ext}")
+        if os.path.exists(temp_audio_path):
+            with open(temp_audio_path, "rb") as src_file:
+                with open(archived_sample_path, "wb") as dest_file:
+                    dest_file.write(src_file.read())
+
+        # STEP 2: Speech-to-Text (Faster-Whisper - तमिल, तेलुगु या कोई भी क्षेत्रीय भाषा)
+        segments, info = await asyncio.to_thread(
+            model.transcribe, temp_audio_path, language=None if source_lang == "auto" else source_lang
+        )
+        recognized_text = " ".join([seg.text for seg in segments]).strip()
+        detected_source_lang = info.language if source_lang == "auto" else source_lang
+        
+        if not recognized_text:
+            future.set_exception(HTTPException(status_code=400, detail="कोई आवाज नहीं पहचानी जा सकी।"))
+            return
+
+        # STEP 3: Knowledge Core से संपर्क (Cloud Microservice Bridge)
+        knowledge_answer = f"[{recognized_text}] से संबंधित अकादमिक जानकारी।"
+        try:
+            res = await http_client.post(KNOWLEDGE_CORE_URL, json={
+                "grade": grade, "stream": stream, "board": board, 
+                "query": recognized_text, "external_api_url": external_api_url
+            })
+            if res.status_code == 200:
+                knowledge_answer = res.json().get("content", knowledge_answer)
+        except Exception as ex:
+            print(f"Cloud Knowledge Bridge Warning: {ex}")
+
+        # STEP 4: Dynamic Polyglot Translation (छात्र की मांगी गई भाषा में बदलना)
+        target_lang_code = desired_target_lang if desired_target_lang else detected_source_lang
+        final_response_text = knowledge_answer
+        
+        if target_lang_code and target_lang_code != detected_source_lang:
+            try:
+                final_response_text = await asyncio.to_thread(
+                    GoogleTranslator(source='auto', target=target_lang_code).translate, knowledge_answer
+                )
+            except Exception as e:
+                print(f"Dynamic Translation Error: {e}")
+
+        # STEP 5: Text-to-Speech (आवाज बनाना)
+        await asyncio.to_thread(
+            lambda: gTTS(text=final_response_text, lang=target_lang_code, slow=False).save(output_audio_path)
+        )
+        
+        # STEP 6: डेटाबेस लॉगिंग
         try:
             with db_lock:
-                conn = sqlite3.connect(DB_FILE, timeout=30.0)
+                conn = sqlite3.connect(DB_URL, timeout=30.0)
                 cursor = conn.cursor()
-                
-                # अन-ट्रेनड डेटा उठाना
-                cursor.execute("SELECT id, recognized_text, processed_text FROM voice_learning_logs WHERE is_trained = 0 LIMIT 50")
-                rows = cursor.fetchall()
-                
-                if rows:
-                    print(f"[Auto-Learning] बैकग्राउंड में {len(rows)} वॉयस पैटर्न्स से सिस्टम ऑटो-ट्यून हो रहा है...")
-                    
-                    # यहाँ भविष्य में मॉडल फाइन-ट्यूनिंग या डिक्शनरी अपडेट का लॉजिक काम करेगा
-                    ids_to_update = [r[0] for r in rows]
-                    cursor.executemany("UPDATE voice_learning_logs SET is_trained = 1 WHERE id = ?", [(i,) for i in ids_to_update])
-                    conn.commit()
-                    print("[Auto-Learning] ऑटो-ट्यूनिंग साइकिल सफलताપूर्वक संपन्न!")
-                    
+                cursor.execute('''
+                    INSERT INTO voice_learning_logs (id, source_lang, target_lang, recognized_text, processed_text, sample_path, is_trained)
+                    VALUES (?, ?, ?, ?, ?, ?, 0)
+                ''', (unique_id, detected_source_lang, target_lang_code, recognized_text, final_response_text, archived_sample_path))
+                conn.commit()
                 conn.close()
+        except Exception as db_ex:
+            print(f"Cloud DB Save Error: {db_ex}")
+
+        future.set_result(output_audio_path)
+
+    except Exception as e:
+        if not future.done():
+            future.set_exception(e)
+    finally:
+        if os.path.exists(temp_audio_path):
+            try:
+                os.remove(temp_audio_path)
+            except:
+                pass
+
+# --- 5. ऑटोनॉमस एडाप्टिव लोड डिस्पैचर ---
+async def adaptive_load_dispatcher():
+    while True:
+        try:
+            task = await task_queue.get()
+            asyncio.create_task(process_single_task(task))
+            task_queue.task_done()
         except Exception as e:
-            print(f"[Auto-Learning Warning - लूप सुरक्षित है]: {e}")
+            print(f"[Dispatcher Error]: {e}")
 
 @app.on_event("startup")
 async def startup_event():
-    asyncio.create_task(background_auto_learning_worker())
+    asyncio.create_task(adaptive_load_dispatcher())
 
-def save_to_db_safe(log_id, src, tgt, rec, proc):
-    """थ्रेड-सेफ डेटाबेस लॉगिंग"""
-    try:
-        with db_lock:
-            conn = sqlite3.connect(DB_FILE, timeout=30.0)
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO voice_learning_logs (id, source_lang, target_lang, recognized_text, processed_text, is_trained)
-                VALUES (?, ?, ?, ?, ?, 0)
-            ''', (log_id, src, tgt, rec, proc))
-            conn.commit()
-            conn.close()
-    except Exception as e:
-        print(f"DB Save Error: {e}")
-
-def cleanup_file(file_path: str):
-    """सुरक्षित डिस्क क्लीनअप (Storage Leak Prevention)"""
-    if file_path and os.path.exists(file_path):
-        try:
-            os.remove(file_path)
-        except Exception as e:
-            print(f"File Cleanup Error: {e}")
-
-# --- 4. मुख्य स्पीच-टू-स्पीच और ऑटो-लर्निंग एंडपॉइंट ---
-@app.post("/process-voice-learning")
-def process_voice_with_learning(
+# --- 6. मुख्य पॉलीग्लॉट वॉयस एंडपॉइंट (Go Backend से कनेक्ट होने के लिए) ---
+@app.post("/polyglot-voice-query")
+async def polyglot_voice_query(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    source_lang: str = Form(...),          
-    target_lang: str = Form(None)          
+    grade: str = Form("Class_12"),
+    stream: str = Form("General"),
+    board: str = Form("CBSE"),
+    source_lang: str = Form("auto"),
+    desired_target_lang: str = Form("hi"),
+    external_api_url: str = Form(None)
 ):
-    # STEP 1: यूनिक आईडी और पाथ ट्रेव्हर्सेल सुरक्षा (Path Sanitization)
     unique_id = str(uuid.uuid4())
     safe_filename = os.path.basename(file.filename) if file.filename else "audio.wav"
     temp_audio_path = f"temp_{unique_id}_{safe_filename}"
     output_audio_path = f"response_{unique_id}.mp3"
     
-    # इनपुट फाइल सेव करना
     try:
         with open(temp_audio_path, "wb") as buffer:
-            buffer.write(file.file.read())
+            buffer.write(await file.read())
     except Exception as e:
         return {"status": "error", "message": f"File save failed: {str(e)}"}
     
+    future = asyncio.get_running_loop().create_future()
+
+    task_payload = {
+        "unique_id": unique_id,
+        "temp_audio_path": temp_audio_path,
+        "output_audio_path": output_audio_path,
+        "grade": grade,
+        "stream": stream,
+        "board": board,
+        "source_lang": source_lang,
+        "desired_target_lang": desired_target_lang,
+        "external_api_url": external_api_url,
+        "future": future
+    }
+
     try:
-        # STEP 2: Speech-to-Text (STT) - आवाज को टेक्स्ट में बदलना
-        segments, _ = model.transcribe(temp_audio_path, language=source_lang)
-        recognized_text = " ".join([seg.text for seg in segments]).strip()
-        
-        if not recognized_text:
-            background_tasks.add_task(cleanup_file, temp_audio_path)
-            raise HTTPException(status_code=400, detail="कोई आवाज नहीं पहचानी जा सकी।")
+        await task_queue.put(task_payload, block=False)
+    except asyncio.QueueFull:
+        if os.path.exists(temp_audio_path):
+            os.remove(temp_audio_path)
+        raise HTTPException(status_code=503, detail="क्लाउड सर्वर पर अत्यधिक ट्रैफिक है, कृपया कुछ सेकंड बाद प्रयास करें।")
 
-        # STEP 3: Dynamic Translation (बिना किसी हार्डकोडिंग के, डिमांड पर आधारित)
-        processed_text = recognized_text
-        actual_target_lang = target_lang if target_lang else source_lang
-        
-        if target_lang and target_lang != source_lang:
-            try:
-                processed_text = GoogleTranslator(source=source_lang, target=target_lang).translate(recognized_text)
-            except Exception as e:
-                print(f"Translation Error: {e}")
-                processed_text = recognized_text
-
-        # STEP 4: Text-to-Speech (TTS) - टेक्स्ट को वापस आवाज में बदलना
-        tts = gTTS(text=processed_text, lang=actual_target_lang, slow=False)
-        tts.save(output_audio_path)
-        
-        # STEP 5: डेटाबेस में डेटा लॉग करना (ऑटो-लर्निंग के लिए)
-        background_tasks.add_task(
-            save_to_db_safe, 
-            unique_id, source_lang, actual_target_lang, recognized_text, processed_text
-        )
-
-        # इनपुट टेंपररी फाइल को तुरंत हटाना
-        background_tasks.add_task(cleanup_file, temp_audio_path)
-
-        # STEP 6: FileResponse के जरिए सुरक्षित स्ट्रीमिंग और गो बैकएंड को ऑडियो भेजना
+    try:
+        processed_audio = await future
         return FileResponse(
-            path=output_audio_path,
+            path=processed_audio,
             media_type="audio/mpeg",
-            filename=output_audio_path,
-            background=BackgroundTasks([lambda: cleanup_file(output_audio_path)])
+            filename=processed_audio,
+            background=BackgroundTasks([lambda: os.path.exists(processed_audio) and os.remove(processed_audio)])
         )
-        
     except HTTPException as he:
-        background_tasks.add_task(cleanup_file, temp_audio_path)
         raise he
     except Exception as e:
-        background_tasks.add_task(cleanup_file, temp_audio_path)
-        background_tasks.add_task(cleanup_file, output_audio_path)
+        if os.path.exists(output_audio_path):
+            try:
+                os.remove(output_audio_path)
+            except:
+                pass
         return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
+                         
